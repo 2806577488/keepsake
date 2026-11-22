@@ -1,17 +1,15 @@
-/// Keepsake（留声）— Material 3 主题（UI 规格 v1.1）+ Markdown 样式表。
+/// Keepsake（留声）— Material 3 主题（UI 规格 v2 拍板稿）。
 ///
-/// 结构（README v1.1）：
-/// - [KeepsakeColors]：**基线 token**（§1 全表）。浅色底、主色、代码块、深色分层（§8）。
-/// - `core/skins.dart`：皮肤注册表（A 基线 / E 撞色 / H 深色锚点）。三套皮肤只覆盖
-///   README §0 的 3 个 token + 前景色，其余沿用基线。
-/// - [KeepsakeSkinColors]：把「基线 + 皮肤覆盖 + 亮度」解析成一组可直接用的颜色，
-///   以 [ThemeExtension] 挂在主题上；组件用 `KeepsakeSkinColors.of(context)` 取，
-///   **不在 UI 里 `switch (skinId)`**（加皮肤只改注册表数据）。
-/// - [KeepsakeTheme]：字阶（§2）、圆角（§3）、零阴影（§1 阴影全 0）都在这里定。
+/// 结构：
+/// - `core/skin_tokens.dart`：**唯一**的色值 / 形态 / 圆角出处（[SkinColors] /
+///   [SkinMorph] / [SkinTokens]）。本文件不再出现任何 `Color(0x..)` 字面量。
+/// - `core/skins.dart`：皮肤注册表（A 清透 / E 纸感 / H 墨色）。
+/// - [KeepsakeSkinColors]：把当前皮肤的 token 以 [ThemeExtension] 挂在主题上；
+///   页面统一 `KeepsakeSkinColors.of(context)`，用 `s.m`（形态）/ `s.c`（颜色）/
+///   `s.rBubble`（预构造圆角）取，**圆角一律走 token，不自己算**。
+/// - [KeepsakeTheme]：字阶、圆角、零阴影。所有尺寸来自 token 层。
 ///
-/// 说明：
-/// - seed color 仍为 `#2F6B5F`（README §1「主色由 seed 推导」）。
-/// - 零阴影：所有 Surface 组件 elevation 0，全站不用 boxShadow。
+/// 零阴影：全站 elevation 0，不用 boxShadow；层次靠 surface → low → high → highest。
 library;
 
 import 'package:flutter/material.dart';
@@ -21,80 +19,22 @@ import 'package:markdown/markdown.dart' as md;
 import 'skins.dart';
 
 // ---------------------------------------------------------------------------
-// 基线 token（README §1）
+// 解析后的皮肤 token（ThemeExtension）
 // ---------------------------------------------------------------------------
 
-/// 与皮肤无关的基线色（README §1「Token 全表」+ §8「深色」）。
-abstract final class KeepsakeColors {
-  // ---- 浅色底 ----
-  static const Color surface = Color(0xFFF5FBF7);
-  static const Color surfaceContainerLow = Color(0xFFEFF5F2);
-  static const Color surfaceContainerHigh = Color(0xFFE3EAE6);
-  static const Color surfaceContainerHighest = Color(0xFFDEE4E1);
-  static const Color usageBar = Color(0xFFE9EFEC);
-  static const Color outlineVariant = Color(0xFFCAD1CD);
-  static const Color outline = Color(0xFF7C8B86);
-  static const Color onSurface = Color(0xFF191C1B);
-  static const Color onSurfaceVariant = Color(0xFF496F66);
-  static const Color error = Color(0xFFBA1A1A);
-
-  // ---- 主色（seed `#2F6B5F` 推导） ----
-  static const Color primary = Color(0xFF046B5C);
-
-  // ---- 代码块 ----
-  static const Color codeBackground = Color(0xFFFFFFFF);
-  static const Color codeHeader = Color(0xFFE7F3EF);
-  static const Color codeDivider = Color(0xFFD5EAE3);
-  static const Color codeForeground = Color(0xFF161B1A);
-
-  // ---- FAB 描边（README §7） ----
-  static const Color fabBorder = Color(0xFF8CCDBB);
-
-  // ---- 深色分层（README §8：明度差保持 8% 以上） ----
-  static const Color darkSurface = Color(0xFF101614);
-  static const Color darkSurfaceContainerLow = Color(0xFF161D1A);
-  static const Color darkSurfaceContainerHigh = Color(0xFF1C2421);
-  static const Color darkSurfaceContainerHighest = Color(0xFF232C28);
-  static const Color darkOutlineVariant = Color(0xFF3A4A45);
-  static const Color darkOutline = Color(0xFF7F948E);
-  static const Color darkOnSurface = Color(0xFFE6EFEA);
-  static const Color darkOnSurfaceVariant = Color(0xFFA3C1B7);
-  static const Color darkUsageBar = Color(0xFF1C2421);
-  static const Color darkCodeBackground = Color(0xFF161D1A);
-  static const Color darkCodeHeader = Color(0xFF22302B);
-  static const Color darkCodeDivider = Color(0xFF2E3D37);
-}
-
-// ---------------------------------------------------------------------------
-// 解析后的皮肤颜色（ThemeExtension）
-// ---------------------------------------------------------------------------
-
-/// 当前皮肤 + 亮度解析出来的一组颜色。
+/// 当前皮肤 + 亮度解析出来的 token。
 ///
-/// 组件只需要 `KeepsakeSkinColors.of(context)`，不关心是哪一套皮肤：
-/// 用户气泡、发送键、列表头像、助手头像、多选选中、思考条、代码块。
+/// 页面只依赖这一个入口：
+/// - `s.c` → 颜色（[SkinColors]）
+/// - `s.m` → 形态（[SkinMorph]）：圆角数值、字号、行高、字重、图标风格、字体
+/// - `s.rBubble` / `s.rCard` / `s.rField` … → 预构造 `BorderRadius`
+/// - `s.userBubbleBg` … → v1.1 就有的命名，保留以减少页面改动
 @immutable
 class KeepsakeSkinColors extends ThemeExtension<KeepsakeSkinColors> {
   const KeepsakeSkinColors({
     required this.skin,
     required this.brightness,
-    required this.userBubbleBg,
-    required this.userBubbleFg,
-    required this.sendBg,
-    required this.sendFg,
-    required this.listAvatarBg,
-    required this.listAvatarFg,
-    required this.aiAvatarBg,
-    required this.aiAvatarFg,
-    required this.selectionBg,
-    required this.selectionBar,
-    required this.onSelection,
-    required this.fabBorder,
-    required this.usageBar,
-    required this.codeBackground,
-    required this.codeHeader,
-    required this.codeDivider,
-    required this.codeForeground,
+    required this.tokens,
   });
 
   /// 当前皮肤（设置页展示 / 调试用）。
@@ -103,94 +43,115 @@ class KeepsakeSkinColors extends ThemeExtension<KeepsakeSkinColors> {
   /// 当前亮度。
   final Brightness brightness;
 
-  /// 用户气泡底 / 前景（README §0 `primaryContainer` / `onPrimaryContainer`）。
-  final Color userBubbleBg;
-  final Color userBubbleFg;
+  /// 当前皮肤的完整 token。
+  final SkinTokens tokens;
 
-  /// 发送键底 / 前景（README §0 `sendButton` / `onSend`）。
-  final Color sendBg;
-  final Color sendFg;
+  /// 颜色快捷方式。
+  SkinColors get c => tokens.colors;
 
-  /// 列表行头像底 / 前景（README §0 `listAvatar` / `onListAvatar`）。
-  final Color listAvatarBg;
-  final Color listAvatarFg;
+  /// 形态快捷方式。
+  SkinMorph get m => tokens.morph;
+
+  // ---- 圆角（页面只能用这些，不许自己 circular）----
+  BorderRadius get rBubble => tokens.rBubble;
+  BorderRadius get rFab => tokens.rFab;
+  BorderRadius get rCard => tokens.rCard;
+  BorderRadius get rChip => tokens.rChip;
+  BorderRadius get rField => tokens.rField;
+  BorderRadius get rSend => tokens.rSend;
+  BorderRadius get rCb => tokens.rCb;
+  BorderRadius get rRadio => tokens.rRadio;
+  BorderRadius get rSheetTop => tokens.rSheetTop;
+  BorderRadius get rSheet => tokens.rSheet;
+  BorderRadius get rAvatar => tokens.rAvatar;
+  BorderRadius get rPill => tokens.rPill;
+
+  // ---- 字号 / 字重 / 行高 ----
+  double get fsBar => m.fsBar;
+  double get fsTitle => m.fsTitle;
+  double get fsBody => m.fsBody;
+  double get fsSub => m.fsSub;
+  double get lineHeight => m.lineHeight;
+  FontWeight get titleWeight => m.titleWeight;
+  double get titleLetterSpacing => m.titleLetterSpacing;
+  String? get fontFamily => m.fontFamily;
+  List<String>? get fontFamilyFallback => m.fontFamilyFallback;
+
+  /// 元信息字体族（E 走等宽）。
+  String? get metaFontFamily => m.metaFontFamily;
+
+  /// 图标尺寸 / 是否描边风格。
+  double get iconSize => m.iconSize;
+  bool get outlined => m.outlined;
+
+  /// 按皮肤选实心 / 描边图标：A/H 走 [filled]，E 走 [outlined]。
+  ///
+  /// Material 图标没有字重轴，实心与描边是两个不同 glyph，只能在这里换。
+  IconData icon({required IconData filled, required IconData outlined}) =>
+      m.outlined ? outlined : filled;
+
+  // ---- 颜色（v1.1 命名，方便页面渐进迁移）----
+  /// 用户气泡底 / 文字（primaryContainer / onPrimaryContainer）。
+  Color get userBubbleBg => c.pC;
+  Color get userBubbleFg => c.onPC;
+
+  /// AI 气泡底 / 文字。
+  Color get aiBubbleBg => c.aiBg;
+  Color get aiBubbleFg => c.aiFg;
+
+  /// 发送键底 / 前景。
+  Color get sendBg => c.sendBg;
+  Color get sendFg => c.sendFg;
+
+  /// 列表行头像底 / 前景。
+  Color get listAvatarBg => c.avBg;
+  Color get listAvatarFg => c.avFg;
 
   /// 助手头像底 / 前景。
-  final Color aiAvatarBg;
-  final Color aiAvatarFg;
+  Color get aiAvatarBg => c.aiBg;
+  Color get aiAvatarFg => c.aiFg;
 
-  /// 多选选中行底色 / 左侧 2px 竖条 / 选中行文字色。
-  final Color selectionBg;
-  final Color selectionBar;
-  final Color onSelection;
+  /// 多选选中底色 / 左侧竖条 / 选中行文字色。
+  Color get selectionBg => c.selBg;
+  Color get selectionBar => c.selBar;
+  Color get onSelection => ThemeData.estimateBrightnessForColor(c.selBg) ==
+          Brightness.light
+      ? c.onS
+      : c.onV;
 
-  /// FAB 1px 描边（README §7 `#8CCDBB`）。
-  final Color fabBorder;
+  /// 思考过程条底色。
+  Color get usageBar => c.usage;
 
-  /// 思考过程条底色（README §1 `usageBar`）。
-  final Color usageBar;
+  /// 代码块：底 / 头 / 分隔线 / 前景。
+  Color get codeBackground => c.codeBg;
+  Color get codeHeader => c.codeHead;
+  Color get codeDivider => c.codeDiv;
+  Color get codeForeground => c.codeFg;
 
-  /// 代码块：白纸 / 头部 / 分隔线 / 前景（README §1、§4.3）。
-  final Color codeBackground;
-  final Color codeHeader;
-  final Color codeDivider;
-  final Color codeForeground;
+  /// 图标色（H 深青）。
+  Color get iconColor => c.iconC;
 
   /// 是否深色。
   bool get isDark => brightness == Brightness.dark;
 
-  /// 直接取当前主题的皮肤颜色（主题里没挂 extension 时按第一套皮肤兜底）。
+  /// 卡片 / 气泡 / 输入框的 1px 描边（只有 E 有）。
+  ///
+  /// 拍板稿 §4.2「卡片描边只有 E 有」：A/H 靠底色分层，返回 null。
+  Border? get hairlineBorder => m.cardBorderWidth <= 0
+      ? null
+      : Border.all(width: m.cardBorderWidth, color: c.ov);
+
+  /// 直接取当前主题的 token（主题里没挂 extension 时按第一套皮肤兜底）。
   static KeepsakeSkinColors of(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final KeepsakeSkinColors? attached =
         theme.extension<KeepsakeSkinColors>();
     if (attached != null) return attached;
     final Skin fallback = keepsakeSkins.first;
-    return resolve(fallback, theme.brightness, KeepsakeTheme.schemeFor(fallback, theme.brightness));
-  }
-
-  /// 由皮肤 + 亮度 + ColorScheme 解析（纯函数，方便单测）。
-  static KeepsakeSkinColors resolve(
-    Skin skin,
-    Brightness brightness,
-    ColorScheme scheme,
-  ) {
-    final bool dark = brightness == Brightness.dark;
-    final SkinTokens t = skin.tokensFor(brightness);
-    // 选中行：底色是皮肤给的浅色块，文字必须跟着底色走（深色模式下不能还写亮字）。
-    final Color onSelection =
-        ThemeData.estimateBrightnessForColor(t.secondaryContainer) ==
-            Brightness.light
-        ? KeepsakeColors.onSurface
-        : KeepsakeColors.darkOnSurface;
     return KeepsakeSkinColors(
-      skin: skin,
-      brightness: brightness,
-      userBubbleBg: t.primaryContainer,
-      userBubbleFg: t.onPrimaryContainer,
-      sendBg: t.sendButton,
-      sendFg: t.onSend,
-      listAvatarBg: t.listAvatar,
-      listAvatarFg: t.onListAvatar,
-      aiAvatarBg: t.resolvedAiAvatar,
-      aiAvatarFg: t.resolvedOnAiAvatar,
-      selectionBg: t.secondaryContainer,
-      selectionBar: t.selectionBar ?? KeepsakeColors.primary,
-      onSelection: onSelection,
-      fabBorder: t.sendBorder ?? KeepsakeColors.fabBorder,
-      usageBar: dark ? KeepsakeColors.darkUsageBar : KeepsakeColors.usageBar,
-      codeBackground: dark
-          ? KeepsakeColors.darkCodeBackground
-          : KeepsakeColors.codeBackground,
-      codeHeader: dark
-          ? KeepsakeColors.darkCodeHeader
-          : KeepsakeColors.codeHeader,
-      codeDivider: dark
-          ? KeepsakeColors.darkCodeDivider
-          : KeepsakeColors.codeDivider,
-      codeForeground: dark
-          ? KeepsakeColors.darkOnSurface
-          : KeepsakeColors.codeForeground,
+      skin: fallback,
+      brightness: theme.brightness,
+      tokens: fallback.tokensFor(theme.brightness),
     );
   }
 
@@ -198,98 +159,21 @@ class KeepsakeSkinColors extends ThemeExtension<KeepsakeSkinColors> {
   KeepsakeSkinColors copyWith({
     Skin? skin,
     Brightness? brightness,
-    Color? userBubbleBg,
-    Color? userBubbleFg,
-    Color? sendBg,
-    Color? sendFg,
-    Color? listAvatarBg,
-    Color? listAvatarFg,
-    Color? aiAvatarBg,
-    Color? aiAvatarFg,
-    Color? selectionBg,
-    Color? selectionBar,
-    Color? onSelection,
-    Color? fabBorder,
-    Color? usageBar,
-    Color? codeBackground,
-    Color? codeHeader,
-    Color? codeDivider,
-    Color? codeForeground,
+    SkinTokens? tokens,
   }) {
     return KeepsakeSkinColors(
       skin: skin ?? this.skin,
       brightness: brightness ?? this.brightness,
-      userBubbleBg: userBubbleBg ?? this.userBubbleBg,
-      userBubbleFg: userBubbleFg ?? this.userBubbleFg,
-      sendBg: sendBg ?? this.sendBg,
-      sendFg: sendFg ?? this.sendFg,
-      listAvatarBg: listAvatarBg ?? this.listAvatarBg,
-      listAvatarFg: listAvatarFg ?? this.listAvatarFg,
-      aiAvatarBg: aiAvatarBg ?? this.aiAvatarBg,
-      aiAvatarFg: aiAvatarFg ?? this.aiAvatarFg,
-      selectionBg: selectionBg ?? this.selectionBg,
-      selectionBar: selectionBar ?? this.selectionBar,
-      onSelection: onSelection ?? this.onSelection,
-      fabBorder: fabBorder ?? this.fabBorder,
-      usageBar: usageBar ?? this.usageBar,
-      codeBackground: codeBackground ?? this.codeBackground,
-      codeHeader: codeHeader ?? this.codeHeader,
-      codeDivider: codeDivider ?? this.codeDivider,
-      codeForeground: codeForeground ?? this.codeForeground,
+      tokens: tokens ?? this.tokens,
     );
   }
 
+  /// 皮肤切换不做颜色插值：半程混色会出现设计稿里没有的颜色。
   @override
   KeepsakeSkinColors lerp(ThemeExtension<KeepsakeSkinColors>? other, double t) {
     if (other is! KeepsakeSkinColors) return this;
-    return KeepsakeSkinColors(
-      skin: t < 0.5 ? skin : other.skin,
-      brightness: t < 0.5 ? brightness : other.brightness,
-      userBubbleBg: Color.lerp(userBubbleBg, other.userBubbleBg, t)!,
-      userBubbleFg: Color.lerp(userBubbleFg, other.userBubbleFg, t)!,
-      sendBg: Color.lerp(sendBg, other.sendBg, t)!,
-      sendFg: Color.lerp(sendFg, other.sendFg, t)!,
-      listAvatarBg: Color.lerp(listAvatarBg, other.listAvatarBg, t)!,
-      listAvatarFg: Color.lerp(listAvatarFg, other.listAvatarFg, t)!,
-      aiAvatarBg: Color.lerp(aiAvatarBg, other.aiAvatarBg, t)!,
-      aiAvatarFg: Color.lerp(aiAvatarFg, other.aiAvatarFg, t)!,
-      selectionBg: Color.lerp(selectionBg, other.selectionBg, t)!,
-      selectionBar: Color.lerp(selectionBar, other.selectionBar, t)!,
-      onSelection: Color.lerp(onSelection, other.onSelection, t)!,
-      fabBorder: Color.lerp(fabBorder, other.fabBorder, t)!,
-      usageBar: Color.lerp(usageBar, other.usageBar, t)!,
-      codeBackground: Color.lerp(codeBackground, other.codeBackground, t)!,
-      codeHeader: Color.lerp(codeHeader, other.codeHeader, t)!,
-      codeDivider: Color.lerp(codeDivider, other.codeDivider, t)!,
-      codeForeground: Color.lerp(codeForeground, other.codeForeground, t)!,
-    );
+    return t < 0.5 ? this : other;
   }
-}
-
-/// 设计稿新增的颜色派生（保留旧 API 名字；值改为 README §1 的固定值）。
-///
-/// - [codeHeader]：代码块头部 `#E7F3EF`（深色 `#22302B`）；
-/// - [codeDivider]：头部与代码区的 1px 分隔线 `#D5EAE3`（深色 `#2E3D37`）；
-/// - [usageBarBg]：思考过程条底色 `#E9EFEC`（深色 `#1C2421`）；
-/// - [selectedBorder]：芯片描边过渡色（选中态用透明占位，见 §4.4）。
-extension KeepsakeSchemeX on ColorScheme {
-  /// 是否深色主题。
-  bool get _isDark => brightness == Brightness.dark;
-
-  /// 代码块头部底色（README §1 `codeHeader`）。
-  Color get codeHeader =>
-      _isDark ? KeepsakeColors.darkCodeHeader : KeepsakeColors.codeHeader;
-
-  /// 代码块头部分隔线（README §1 `codeDivider`）。
-  Color get codeDivider =>
-      _isDark ? KeepsakeColors.darkCodeDivider : KeepsakeColors.codeDivider;
-
-  /// 思考过程条底色（README §1 `usageBar`）。
-  Color get usageBarBg =>
-      _isDark ? KeepsakeColors.darkUsageBar : KeepsakeColors.usageBar;
-
-  /// 选中芯片 / 选中项描边的过渡色（默认 40% primary）。
-  Color get selectedBorder => primary.withValues(alpha: 0.4);
 }
 
 // ---------------------------------------------------------------------------
@@ -298,60 +182,65 @@ extension KeepsakeSchemeX on ColorScheme {
 
 /// Keepsake 的 Material 3 主题。
 abstract final class KeepsakeTheme {
-  /// 主色种子（README §1：`ColorScheme.fromSeed(#2F6B5F)`）。
-  static const Color seedColor = Color(0xFF2F6B5F);
+  /// 主色种子（M3 派生用）。
+  static const Color seedColor = kSeedColor;
 
-  /// 等宽字体族（字符串表实证 token `monospace`）。
-  static const String monoFontFamily = 'monospace';
+  /// 等宽字体族（等宽元信息、代码块）。
+  static const String monoFontFamily = kMonoFontFamily;
 
-  /// 页面左右内边距（README §3：16）。
-  static const double pagePadding = 16;
+  /// 页面左右内边距 16。
+  static const double pagePadding = kPagePadding;
 
-  /// 顶栏高度（README §4.1：56）。
-  static const double barHeight = 56;
+  /// 顶栏高度 56。
+  static const double barHeight = kBarHeight;
 
-  /// 会话行 / 多选行高度（README §4.1、§4.6、§5 规则 3：68）。
-  static const double listRowHeight = 68;
+  /// 会话行高度 68（三套一致）。
+  static const double listRowHeight = kRowHeight;
 
-  /// 设置项高度（README §3：64）。
-  static const double settingsRowHeight = 64;
+  /// 设置项高度 64。
+  static const double settingsRowHeight = kSettingsRowHeight;
 
-  /// 弹层选项行高度（README §4.5：64）。
-  static const double sheetRowHeight = 64;
+  /// 弹层选项行高度 64。
+  static const double sheetRowHeight = kSheetRowHeight;
 
-  /// 列表头像直径（README §4.1：34）。
-  static const double listAvatarSize = 34;
+  /// 列表头像 34。
+  static const double listAvatarSize = kListAvatarSize;
 
-  /// 复选框槽位（README §5 规则 2：34）与复选框本身（§4.6：20）。
-  static const double checkboxSlot = 34;
-  static const double checkboxSize = 20;
+  /// 复选框槽位 34，复选框本身 20。
+  static const double checkboxSlot = kCheckboxSlot;
+  static const double checkboxSize = kCheckboxSize;
 
-  /// FAB 高度 / 圆角（README §4.1：56 / 16）。
-  static const double fabHeight = 56;
-  static const double fabRadius = 16;
+  /// FAB 高 56（圆角按皮肤）。
+  static const double fabHeight = kFabHeight;
 
-  /// 芯片行高 / 圆角（README §4.4：32 / 16），输入框高 / 圆角（48 / 24）。
-  static const double chipHeight = 32;
-  static const double chipRadius = 16;
+  /// chip 高 32 / 内距 12。
+  static const double chipHeight = kChipHeight;
+  static const double chipPadH = kChipPadH;
+
+  /// 输入框最小高 48（圆角按皮肤）。
   static const double inputHeight = 48;
-  static const double inputRadius = 24;
 
-  /// 发送键（README §4.4：44 / 22）。
-  static const double sendSize = 44;
-  static const double sendRadius = 22;
+  /// 发送键 44（圆角按皮肤）。
+  static const double sendSize = kSendSize;
 
-  /// 气泡圆角（README §3：大角 18 / 贴角 4）与弹层顶圆角（28）。
-  static const double bubbleRadius = 18;
-  static const double bubbleTailRadius = 4;
-  static const double sheetTopRadius = 28;
+  /// 弹层抓手 / 内距 / 按钮高。
+  static const double sheetGrabberW = kSheetGrabberW;
+  static const double sheetGrabberH = kSheetGrabberH;
+  static const double sheetPadding = kSheetPadding;
+  static const double sheetButtonHeight = kSheetButtonHeight;
 
-  /// 卡片 / 建议项圆角（README §3：14）。
-  static const double cardRadius = 14;
-
-  /// 图标统一 24（README §6）；特殊尺寸见 §6 表（发送 20、复制 18、勾 16）。
+  /// 通用图标尺寸（页面请用 `s.iconSize`，这是 A/H 之外的兜底值）。
   static const double iconSize = 24;
 
-  /// 代码/等宽文本样式。
+  /// 动作条（朗读 / 复制 / 重答 / 分支）：图标 15、文字 12、图标↔文字 5、
+  /// 项间距 16、左缩进 30（SPEC §4.4）。
+  static const double actionIconSize = kActionIconSize;
+  static const double actionFontSize = kActionFontSize;
+  static const double actionGap = kActionGap;
+  static const double actionSpacing = kActionSpacing;
+  static const double actionIndent = kActionIndent;
+
+  /// 代码 / 等宽文本样式。
   static TextStyle monoStyle({
     double fontSize = 13,
     FontWeight? fontWeight,
@@ -373,86 +262,92 @@ abstract final class KeepsakeTheme {
 
   /// 按亮度 + 皮肤 id 构建主题。
   ///
-  /// 皮肤 id 来自设置（`Settings.skinId`）；未知 id 由 [skinById] 回退第一套，
-  /// 所以加皮肤只需要往 [keepsakeSkins] 里追加数据。
+  /// 皮肤 id 来自设置（`Settings.skinId`）；未知 id 由 [skinById] 回退第一套。
   static ThemeData of(Brightness brightness, {String skinId = kDefaultSkinId}) {
     final Skin skin = skinById(skinId);
-    final ColorScheme scheme = schemeFor(skin, brightness);
-    final KeepsakeSkinColors colors = KeepsakeSkinColors.resolve(
-      skin,
-      brightness,
-      scheme,
-    );
-    final ThemeData base = ThemeData(
+    final SkinTokens tokens = skin.tokensFor(brightness);
+    final SkinColors c = tokens.colors;
+    final SkinMorph m = tokens.morph;
+    final ColorScheme scheme = schemeFor(tokens, brightness);
+    final bool serif = m.fontFamily != null;
+
+    ThemeData base = ThemeData(
       useMaterial3: true,
       brightness: brightness,
       colorScheme: scheme,
+      // E 纸感：主字体宋体（系统无宋体时按 fallback 链退回，最终退回黑体）。
+      // 打包思源宋体子集后：字体族名换成 assets 里声明的 family，删掉 fallback 链。
+      fontFamily: m.fontFamily,
+      fontFamilyFallback: m.fontFamilyFallback,
     );
-    final TextTheme textTheme = _textTheme(base.textTheme);
+    TextTheme textTheme = _textTheme(base.textTheme, m);
+    if (serif) {
+      textTheme = textTheme.apply(
+        fontFamily: m.fontFamily,
+        fontFamilyFallback: m.fontFamilyFallback,
+      );
+    }
 
     return base.copyWith(
-      // 皮肤颜色挂在主题上，页面用 KeepsakeSkinColors.of(context) 取。
-      extensions: <ThemeExtension<dynamic>>[colors],
+      // 皮肤 token 挂在主题上，页面用 KeepsakeSkinColors.of(context) 取。
+      extensions: <ThemeExtension<dynamic>>[
+        KeepsakeSkinColors(skin: skin, brightness: brightness, tokens: tokens),
+      ],
       textTheme: textTheme,
-      scaffoldBackgroundColor: scheme.surface,
+      scaffoldBackgroundColor: c.surface,
       // ---- 零阴影：全站 0 elevation ----
       appBarTheme: AppBarTheme(
         centerTitle: false,
         elevation: 0,
         scrolledUnderElevation: 0,
-        backgroundColor: scheme.surface,
+        backgroundColor: c.surface,
         surfaceTintColor: Colors.transparent,
-        foregroundColor: scheme.onSurface,
-        // 顶栏 56（README §4.1），左右图标 48 触达（§3：触摸区 ≥48）。
-        toolbarHeight: barHeight,
+        foregroundColor: c.onS,
+        toolbarHeight: kBarHeight,
         titleSpacing: 8,
-        iconTheme: IconThemeData(size: iconSize, color: scheme.onSurface),
-        actionsIconTheme: IconThemeData(
-          size: iconSize,
-          color: scheme.onSurface,
-        ),
-        // 顶栏标题 20/600（README §2 titleLarge、§4.1）。
+        iconTheme: IconThemeData(size: m.iconSize, color: c.iconC),
+        actionsIconTheme: IconThemeData(size: m.iconSize, color: c.iconC),
+        // 顶栏标题 fs-bar / title-w。
         titleTextStyle: textTheme.titleLarge?.copyWith(
-          color: scheme.onSurface,
-          fontWeight: FontWeight.w600,
+          color: c.onS,
+          fontSize: m.fsBar,
+          fontWeight: m.titleWeight,
+          letterSpacing: m.fsBar * m.titleLSEm,
         ),
       ),
+      iconTheme: IconThemeData(size: m.iconSize, color: c.iconC),
       cardTheme: CardThemeData(
         elevation: 0,
-        color: scheme.surfaceContainerLow,
+        color: c.low,
         surfaceTintColor: Colors.transparent,
         margin: EdgeInsets.zero,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(cardRadius),
+          borderRadius: tokens.rCard,
+          side: _sideFor(tokens),
         ),
       ),
       dialogTheme: DialogThemeData(
         elevation: 0,
-        backgroundColor: scheme.surfaceContainerLow,
+        backgroundColor: c.low,
         surfaceTintColor: Colors.transparent,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(sheetTopRadius),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: tokens.rSheetTop),
       ),
       bottomSheetTheme: BottomSheetThemeData(
         elevation: 0,
-        backgroundColor: scheme.surfaceContainerLow,
+        backgroundColor: c.low,
         surfaceTintColor: Colors.transparent,
-        modalBackgroundColor: scheme.surfaceContainerLow,
+        modalBackgroundColor: c.low,
         showDragHandle: false,
-        // 弹层顶部圆角 28（README §3、§4.5）。
-        shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(
-            top: Radius.circular(sheetTopRadius),
-          ),
-        ),
+        // 弹层只圆上两角，圆角按皮肤（E = 14）。
+        shape: RoundedRectangleBorder(borderRadius: tokens.rSheetTop),
       ),
       popupMenuTheme: PopupMenuThemeData(
         elevation: 0,
         surfaceTintColor: Colors.transparent,
-        color: scheme.surfaceContainerLow,
+        color: c.low,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(cardRadius),
+          borderRadius: tokens.rCard,
+          side: _sideFor(tokens),
         ),
       ),
       floatingActionButtonTheme: FloatingActionButtonThemeData(
@@ -460,180 +355,178 @@ abstract final class KeepsakeTheme {
         focusElevation: 0,
         hoverElevation: 0,
         highlightElevation: 0,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(fabRadius),
-        ),
+        backgroundColor: c.pC,
+        foregroundColor: c.onPC,
+        shape: RoundedRectangleBorder(borderRadius: tokens.rFab),
       ),
-      // 输入框 48 高 / 圆角 24 / surfaceContainerHighest 底 / 15 号字（§4.4）。
+      // 输入框：minHeight 48、圆角 r-field（A 胶囊 / E 6 / H 12）。
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: scheme.surfaceContainerHighest,
+        fillColor: c.highest,
         isDense: true,
-        hintStyle: textTheme.bodyLarge?.copyWith(
-          color: scheme.onSurfaceVariant,
-        ),
+        hintStyle: textTheme.bodyLarge?.copyWith(color: c.onV),
         contentPadding: const EdgeInsets.symmetric(
           horizontal: 16,
           vertical: 12,
         ),
         constraints: const BoxConstraints(minHeight: inputHeight),
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(inputRadius),
+          borderRadius: tokens.rField,
           borderSide: BorderSide.none,
         ),
         enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(inputRadius),
+          borderRadius: tokens.rField,
           borderSide: BorderSide.none,
         ),
         focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(inputRadius),
-          borderSide: BorderSide(color: scheme.primary, width: 1.5),
+          borderRadius: tokens.rField,
+          borderSide: BorderSide(color: c.selBar, width: 1.5),
         ),
       ),
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(sheetTopRadius),
-          ),
+          minimumSize: const Size(0, kSheetButtonHeight),
+          shape: RoundedRectangleBorder(borderRadius: tokens.rCard),
         ),
       ),
-      // 复选框：框 20 圆 6、未选 2px outline、选中 primary + 白勾（README §4.6）。
+      // 复选框：20、圆角 r-cb（A 4 / E 2 / H 3）、未选 2px outline、
+      // 选中 sel-bar 实心 + 白勾。
       checkboxTheme: CheckboxThemeData(
         materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
         visualDensity: VisualDensity.compact,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-        side: BorderSide(color: scheme.outline, width: 2),
+        shape: RoundedRectangleBorder(borderRadius: tokens.rCb),
+        side: BorderSide(color: c.outline, width: 2),
         fillColor: WidgetStateProperty.resolveWith<Color?>((
           Set<WidgetState> states,
         ) {
-          if (states.contains(WidgetState.selected)) {
-            return scheme.primary;
-          }
+          if (states.contains(WidgetState.selected)) return c.selBar;
           return Colors.transparent;
         }),
         checkColor: const WidgetStatePropertyAll<Color>(Colors.white),
       ),
-      chipTheme: base.chipTheme.copyWith(
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(chipRadius),
-        ),
-        side: BorderSide(color: scheme.outlineVariant),
+      // 单选：20，外环 2px + 中心点（Material Radio 默认就是环 + 点 + 留白）。
+      radioTheme: RadioThemeData(
+        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        visualDensity: VisualDensity.compact,
+        fillColor: WidgetStateProperty.resolveWith<Color?>((
+          Set<WidgetState> states,
+        ) {
+          if (states.contains(WidgetState.selected)) return c.selBar;
+          return c.outline;
+        }),
       ),
-      // 设置项 64 高（README §3），左右 16。
+      chipTheme: base.chipTheme.copyWith(
+        shape: RoundedRectangleBorder(borderRadius: tokens.rChip),
+        side: BorderSide(color: c.ov),
+      ),
       listTileTheme: ListTileThemeData(
-        minTileHeight: settingsRowHeight,
-        contentPadding: const EdgeInsets.symmetric(horizontal: pagePadding),
-        iconColor: scheme.onSurfaceVariant,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(cardRadius),
-        ),
-        textColor: scheme.onSurface,
+        minTileHeight: kSettingsRowHeight,
+        contentPadding: const EdgeInsets.symmetric(horizontal: kPagePadding),
+        iconColor: c.onV,
+        textColor: c.onS,
       ),
       dividerTheme: DividerThemeData(
-        color: scheme.outlineVariant,
+        color: c.ov,
         thickness: 1,
         space: 1,
       ),
       snackBarTheme: SnackBarThemeData(
         behavior: SnackBarBehavior.floating,
         elevation: 0,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(cardRadius),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: tokens.rCard),
       ),
     );
   }
 
-  /// 由「基线 token + 皮肤覆盖 + 亮度」生成 ColorScheme。
-  static ColorScheme schemeFor(Skin skin, Brightness brightness) {
-    final bool dark = brightness == Brightness.dark;
-    final SkinTokens t = skin.tokensFor(brightness);
-    final Color onSelection =
-        ThemeData.estimateBrightnessForColor(t.secondaryContainer) ==
+  /// 卡片 / 弹层描边：只有 E（1px `#D8D4CC`）。
+  static BorderSide _sideFor(SkinTokens tokens) => tokens.morph.cardBorderWidth <= 0
+      ? BorderSide.none
+      : BorderSide(
+          color: tokens.colors.ov,
+          width: tokens.morph.cardBorderWidth,
+        );
+
+  /// 由皮肤 token + 亮度生成 ColorScheme。
+  static ColorScheme schemeFor(SkinTokens tokens, Brightness brightness) {
+    final SkinColors c = tokens.colors;
+    final Color onSel = ThemeData.estimateBrightnessForColor(c.selBg) ==
             Brightness.light
-        ? KeepsakeColors.onSurface
-        : KeepsakeColors.darkOnSurface;
+        ? c.onS
+        : c.onV;
     return ColorScheme.fromSeed(
       seedColor: seedColor,
       brightness: brightness,
     ).copyWith(
-      primary: KeepsakeColors.primary,
+      primary: c.selBar,
       onPrimary: Colors.white,
-      primaryContainer: t.primaryContainer,
-      onPrimaryContainer: t.onPrimaryContainer,
-      secondary: KeepsakeColors.primary,
-      secondaryContainer: t.secondaryContainer,
-      onSecondaryContainer: onSelection,
-      surface: dark ? KeepsakeColors.darkSurface : KeepsakeColors.surface,
-      onSurface: dark ? KeepsakeColors.darkOnSurface : KeepsakeColors.onSurface,
-      onSurfaceVariant: dark
-          ? KeepsakeColors.darkOnSurfaceVariant
-          : KeepsakeColors.onSurfaceVariant,
-      surfaceContainerLow: dark
-          ? KeepsakeColors.darkSurfaceContainerLow
-          : KeepsakeColors.surfaceContainerLow,
-      surfaceContainerHigh: dark
-          ? KeepsakeColors.darkSurfaceContainerHigh
-          : KeepsakeColors.surfaceContainerHigh,
-      surfaceContainerHighest: dark
-          ? KeepsakeColors.darkSurfaceContainerHighest
-          : KeepsakeColors.surfaceContainerHighest,
-      outline: dark ? KeepsakeColors.darkOutline : KeepsakeColors.outline,
-      outlineVariant: dark
-          ? KeepsakeColors.darkOutlineVariant
-          : KeepsakeColors.outlineVariant,
-      error: KeepsakeColors.error,
+      primaryContainer: c.pC,
+      onPrimaryContainer: c.onPC,
+      secondary: c.selBar,
+      secondaryContainer: c.selBg,
+      onSecondaryContainer: onSel,
+      surface: c.surface,
+      onSurface: c.onS,
+      surfaceContainerLow: c.low,
+      surfaceContainerHigh: c.high,
+      surfaceContainerHighest: c.highest,
+      onSurfaceVariant: c.onV,
+      outline: c.outline,
+      outlineVariant: c.ov,
+      error: c.errC,
       onError: Colors.white,
+      errorContainer: c.errBg,
+      onErrorContainer: c.onErrBg,
     );
   }
 
-  /// 字阶（README §2）：titleLarge 20/600/28、bodyLarge 15/400/24、
-  /// bodyMedium 13/400/20、labelSmall 12/400/16；**全站不低于 12**。
-  static TextTheme _textTheme(TextTheme base) {
+  /// 字阶（拍板稿 §4.2）：顶栏 fs-bar、列表标题 fs-title、正文 fs-body、
+  /// 元信息 fs-sub；行高用皮肤 lh。**全站不低于 12。**
+  static TextTheme _textTheme(TextTheme base, SkinMorph m) {
     return base.copyWith(
-      // 顶栏标题、弹层标题、空态标题。
+      // 顶栏标题、空态标题。
       titleLarge: base.titleLarge?.copyWith(
-        fontSize: 20,
-        fontWeight: FontWeight.w600,
+        fontSize: m.fsBar,
+        fontWeight: m.titleWeight,
+        letterSpacing: m.fsBar * m.titleLSEm,
         height: 28 / 20,
       ),
-      // 弹层选项名称 16/600（README §4.5）。
+      // 列表标题 / 弹层标题。
       titleMedium: base.titleMedium?.copyWith(
-        fontSize: 16,
-        fontWeight: FontWeight.w600,
+        fontSize: m.fsTitle,
+        fontWeight: m.titleWeight,
+        letterSpacing: m.titleLetterSpacing,
         height: 24 / 16,
       ),
-      // 次要标题（仍未覆盖的位置）不低于 14/600。
       titleSmall: base.titleSmall?.copyWith(
-        fontSize: 14,
+        fontSize: m.fsSub + 1,
         fontWeight: FontWeight.w600,
+        letterSpacing: (m.fsSub + 1) * m.titleLSEm,
         height: 20 / 14,
       ),
-      // 对话正文、列表标题（600 由调用点指定）、输入框。
+      // 对话正文 / 列表标题的兜底。
       bodyLarge: base.bodyLarge?.copyWith(
-        fontSize: 15,
+        fontSize: m.fsBody,
         fontWeight: FontWeight.w400,
-        height: 24 / 15,
+        height: m.lineHeight,
       ),
-      // 列表副标题、芯片、弹层副标题。
+      // 列表副标题 / 币信息 / 弹层副标题。
       bodyMedium: base.bodyMedium?.copyWith(
-        fontSize: 13,
+        fontSize: m.fsSub,
         fontWeight: FontWeight.w400,
         height: 20 / 13,
       ),
-      // 旧的 bodySmall 用法（说明文字）抬到 13，避免出现 <12 的字。
       bodySmall: base.bodySmall?.copyWith(
-        fontSize: 13,
+        fontSize: m.fsSub,
         fontWeight: FontWeight.w400,
         height: 20 / 13,
       ),
       labelLarge: base.labelLarge?.copyWith(
-        fontSize: 14,
+        fontSize: m.fsSub + 1,
         fontWeight: FontWeight.w600,
         height: 20 / 14,
       ),
       labelMedium: base.labelMedium?.copyWith(
-        fontSize: 13,
+        fontSize: m.fsSub,
         fontWeight: FontWeight.w500,
         height: 20 / 13,
       ),
@@ -648,73 +541,77 @@ abstract final class KeepsakeTheme {
 }
 
 // ---------------------------------------------------------------------------
-// Markdown（F 批次 `features/chat/widgets/markdown_view.dart` 用）
+// Markdown（`features/chat/widgets/markdown_view.dart` 用）
 // ---------------------------------------------------------------------------
 
 /// markdown 扩展集（GFM：表格/删除线/任务列表/脚注）。
-///
-/// 用法：`MarkdownBody(extensionSet: keepsakeMarkdownExtensionSet, ...)`。
 md.ExtensionSet get keepsakeMarkdownExtensionSet =>
     md.ExtensionSet.gitHubFlavored;
 
 /// 额外**块级** markdown 语法（传给 `MarkdownBody.blockSyntaxes`）。
-///
-/// 目前为空：公式（`$...$`/`$$...$$`）与 mermaid 围栏由 `MarkdownView` 的
-/// `builders` / `_MathSyntax` 处理。签名冻结，需要追加语法时在这里加。
 final List<md.BlockSyntax> keepsakeMarkdownExtensions = <md.BlockSyntax>[];
 
 /// 额外**行内** markdown 语法（传给 `MarkdownBody.inlineSyntaxes`）。
-///
-/// 同上：签名冻结，`_MathSyntax` 可在这里注册。
 final List<md.InlineSyntax> keepsakeMarkdownInlineSyntaxes =
     <md.InlineSyntax>[];
 
-/// Keepsake 的 markdown 样式表（从当前主题派生：代码块、引用、表格统一配色）。
+/// Keepsake 的 markdown 样式表（正文 / 行内代码 / 代码块都按当前皮肤）。
 ///
-/// 字阶按 README §2：正文 15/1.6（气泡里由调用点再确认）、行内代码 13。
+/// 正文 fs-body + lh；代码块用皮肤的 codeBg / codeHead / codeDivider / codeFg。
 MarkdownStyleSheet keepsakeMarkdownStyleSheet(ThemeData theme) {
   final base = MarkdownStyleSheet.fromTheme(theme);
   final scheme = theme.colorScheme;
-  final mono = KeepsakeTheme.monoFontFamily;
+  final KeepsakeSkinColors s =
+      theme.extension<KeepsakeSkinColors>() ??
+      KeepsakeSkinColors(
+        skin: keepsakeSkins.first,
+        brightness: theme.brightness,
+        tokens: keepsakeSkins.first.light,
+      );
+  final SkinMorph m = s.m;
 
   return base.copyWith(
-    p: (base.p ?? const TextStyle()).copyWith(fontSize: 15, height: 1.6),
+    p: (base.p ?? const TextStyle()).copyWith(
+      fontSize: m.fsBody,
+      height: m.lineHeight,
+      color: scheme.onSurface,
+    ),
     a: (base.a ?? const TextStyle()).copyWith(
       color: scheme.primary,
       decoration: TextDecoration.underline,
       decorationColor: scheme.primary.withValues(alpha: 0.6),
     ),
     code: (base.code ?? const TextStyle()).copyWith(
-      fontFamily: mono,
-      fontSize: 13,
+      fontFamily: kMonoFontFamily,
+      fontSize: m.fsSub,
       height: 1.7,
-      backgroundColor: scheme.surfaceContainerHighest,
-      color: scheme.onSurface,
+      backgroundColor: s.codeHeader,
+      color: s.codeForeground,
     ),
     codeblockPadding: const EdgeInsets.all(12),
     codeblockDecoration: BoxDecoration(
-      color: scheme.surfaceContainerHighest,
-      borderRadius: BorderRadius.circular(12),
+      color: s.codeBackground,
+      borderRadius: s.rCard,
+      border: s.hairlineBorder,
     ),
     blockquote: (base.blockquote ?? const TextStyle()).copyWith(
       color: scheme.onSurfaceVariant,
+      fontSize: m.fsBody,
+      height: m.lineHeight,
     ),
     blockquotePadding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
     blockquoteDecoration: BoxDecoration(
-      color: scheme.surfaceContainerHigh,
-      borderRadius: BorderRadius.circular(8),
+      color: s.codeHeader,
+      borderRadius: s.rCard,
       border: Border(
-        left: BorderSide(
-          color: scheme.primary.withValues(alpha: 0.6),
-          width: 3,
-        ),
+        left: BorderSide(color: scheme.primary.withValues(alpha: 0.6), width: 3),
       ),
     ),
-    tableBorder: TableBorder.all(color: scheme.outlineVariant),
+    tableBorder: TableBorder.all(color: s.codeDivider),
     tableCellsPadding: const EdgeInsets.fromLTRB(10, 6, 10, 6),
-    tableCellsDecoration: BoxDecoration(color: scheme.surfaceContainerLow),
+    tableCellsDecoration: BoxDecoration(color: s.codeHeader),
     horizontalRuleDecoration: BoxDecoration(
-      border: Border(top: BorderSide(color: scheme.outlineVariant)),
+      border: Border(top: BorderSide(color: s.codeDivider)),
     ),
     listBullet: (base.listBullet ?? const TextStyle()).copyWith(
       color: scheme.onSurfaceVariant,

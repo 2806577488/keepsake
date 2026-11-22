@@ -34,6 +34,7 @@ import 'package:keepsake/core/import/import_task.dart';
 import 'package:keepsake/core/providers.dart';
 import 'package:keepsake/core/settings.dart';
 import 'package:keepsake/core/skins.dart' show Skin, keepsakeSkins, skinById;
+import 'package:keepsake/core/theme.dart' show KeepsakeSkinColors, KeepsakeTheme;
 import 'package:keepsake/core/update/update_service.dart';
 import 'package:keepsake/features/settings/export_tile.dart';
 import 'package:keepsake/features/settings/import_tile.dart';
@@ -60,33 +61,45 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final controller = TextEditingController(text: settings.systemPrompt);
     final result = await showDialog<String>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('系统提示词'),
-        content: SizedBox(
-          width: 520,
-          child: TextField(
-            controller: controller,
-            autofocus: true,
-            minLines: 4,
-            maxLines: 10,
-            decoration: const InputDecoration(
-              hintText: '留空则使用默认提示词',
-              border: OutlineInputBorder(),
+      builder: (dialogContext) {
+        // 为什么：对话框圆角与按钮高度取皮肤 token（A/H 24、E 14；按钮 38），
+        // 换皮肤时弹层形态跟着变，不用改这份代码。
+        final s = KeepsakeSkinColors.of(dialogContext);
+        return AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: s.rSheet),
+          title: const Text('系统提示词'),
+          content: SizedBox(
+            width: 520,
+            child: TextField(
+              controller: controller,
+              autofocus: true,
+              minLines: 4,
+              maxLines: 10,
+              decoration: const InputDecoration(
+                hintText: '留空则使用默认提示词',
+                border: OutlineInputBorder(),
+              ),
             ),
           ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            onPressed: () =>
-                Navigator.of(dialogContext).pop(controller.text.trim()),
-            child: const Text('保存'),
-          ),
-        ],
-      ),
+          actions: [
+            TextButton(
+              style: TextButton.styleFrom(
+                minimumSize: const Size(64, KeepsakeTheme.sheetButtonHeight),
+              ),
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(
+                minimumSize: const Size(64, KeepsakeTheme.sheetButtonHeight),
+              ),
+              onPressed: () =>
+                  Navigator.of(dialogContext).pop(controller.text.trim()),
+              child: const Text('保存'),
+            ),
+          ],
+        );
+      },
     );
     // 不在这里 dispose：对话框退场动画期间 TextField 仍挂着 listener，
     // 提前 dispose 会触发 framework 断言（真机红屏）。控制器很小，交给 GC。
@@ -107,42 +120,55 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     );
     final result = await showDialog<int>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('上下文预算'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            TextField(
-              controller: controller,
-              autofocus: true,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(
-                labelText: '保留最近 N 轮',
-                border: OutlineInputBorder(),
+      builder: (dialogContext) {
+        final s = KeepsakeSkinColors.of(dialogContext);
+        return AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: s.rSheet),
+          title: const Text('上下文预算'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              TextField(
+                controller: controller,
+                autofocus: true,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                  labelText: '保留最近 N 轮',
+                  border: OutlineInputBorder(),
+                ),
+                onSubmitted: (value) =>
+                    Navigator.of(dialogContext).pop(_parseRounds(value)),
               ),
-              onSubmitted: (value) =>
-                  Navigator.of(dialogContext).pop(_parseRounds(value)),
+              const SizedBox(height: 8),
+              Text(
+                '填 0 表示不限制（全部历史）',
+                // 为什么：说明文字是次要信息，用皮肤 onV 而不是主题默认次色。
+                style: Theme.of(
+                  dialogContext,
+                ).textTheme.bodySmall?.copyWith(color: s.c.onV),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              style: TextButton.styleFrom(
+                minimumSize: const Size(64, KeepsakeTheme.sheetButtonHeight),
+              ),
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('取消'),
             ),
-            const SizedBox(height: 8),
-            Text(
-              '填 0 表示不限制（全部历史）',
-              style: Theme.of(dialogContext).textTheme.bodySmall,
+            FilledButton(
+              style: FilledButton.styleFrom(
+                minimumSize: const Size(64, KeepsakeTheme.sheetButtonHeight),
+              ),
+              onPressed: () =>
+                  Navigator.of(dialogContext).pop(_parseRounds(controller.text)),
+              child: const Text('保存'),
             ),
           ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            onPressed: () =>
-                Navigator.of(dialogContext).pop(_parseRounds(controller.text)),
-            child: const Text('保存'),
-          ),
-        ],
-      ),
+        );
+      },
     );
     // 同上：退场动画期间不 dispose。
     if (result == null || !mounted) return;
@@ -159,30 +185,39 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   // -------------------------------------------------------------------------
 
   Future<void> _clearMemory() async {
-    final theme = Theme.of(context);
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('清空记忆数据'),
-        content: const Text(
-          '会清空整理出的记忆、情绪、人格数据，'
-          '聊天原文全部保留（对话记录不受影响）。此操作不可撤销。',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('取消'),
+      builder: (dialogContext) {
+        final s = KeepsakeSkinColors.of(dialogContext);
+        return AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: s.rSheet),
+          title: const Text('清空记忆数据'),
+          content: const Text(
+            '会清空整理出的记忆、情绪、人格数据，'
+            '聊天原文全部保留（对话记录不受影响）。此操作不可撤销。',
           ),
-          FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: theme.colorScheme.error,
-              foregroundColor: theme.colorScheme.onError,
+          actions: [
+            TextButton(
+              style: TextButton.styleFrom(
+                minimumSize: const Size(64, KeepsakeTheme.sheetButtonHeight),
+              ),
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('取消'),
             ),
-            onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('清空'),
-          ),
-        ],
-      ),
+            FilledButton(
+              // 为什么：危险操作统一用皮肤的错误容器底 + 容器前景，
+              // 写死 colorScheme.error 在 E 的纸面上偏艳。
+              style: FilledButton.styleFrom(
+                minimumSize: const Size(64, KeepsakeTheme.sheetButtonHeight),
+                backgroundColor: s.c.errBg,
+                foregroundColor: s.c.onErrBg,
+              ),
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('清空'),
+            ),
+          ],
+        );
+      },
     );
     if (confirmed != true || !mounted) return;
     try {
@@ -201,40 +236,46 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final settings = ref.read(settingsProvider);
     final level = await showDialog<ThinkingLevel>(
       context: context,
-      builder: (dialogContext) => SimpleDialog(
-        title: const Text('思考强度'),
-        children: [
-          SimpleDialogOption(
-            onPressed: () => Navigator.of(dialogContext).pop(ThinkingLevel.low),
-            child: _optionRow(
-              dialogContext,
-              ThinkingLevel.low,
-              settings.thinkingLevel == ThinkingLevel.low,
-              '更快、更省，适合日常问答',
+      builder: (dialogContext) {
+        // 为什么：弹层圆角走 s.rSheet（A/H 24、E 14）。
+        final s = KeepsakeSkinColors.of(dialogContext);
+        return SimpleDialog(
+          shape: RoundedRectangleBorder(borderRadius: s.rSheet),
+          title: const Text('思考强度'),
+          children: [
+            SimpleDialogOption(
+              onPressed: () =>
+                  Navigator.of(dialogContext).pop(ThinkingLevel.low),
+              child: _optionRow(
+                dialogContext,
+                ThinkingLevel.low,
+                settings.thinkingLevel == ThinkingLevel.low,
+                '更快、更省，适合日常问答',
+              ),
             ),
-          ),
-          SimpleDialogOption(
-            onPressed: () =>
-                Navigator.of(dialogContext).pop(ThinkingLevel.medium),
-            child: _optionRow(
-              dialogContext,
-              ThinkingLevel.medium,
-              settings.thinkingLevel == ThinkingLevel.medium,
-              '默认，平衡速度与推理',
+            SimpleDialogOption(
+              onPressed: () =>
+                  Navigator.of(dialogContext).pop(ThinkingLevel.medium),
+              child: _optionRow(
+                dialogContext,
+                ThinkingLevel.medium,
+                settings.thinkingLevel == ThinkingLevel.medium,
+                '默认，平衡速度与推理',
+              ),
             ),
-          ),
-          SimpleDialogOption(
-            onPressed: () =>
-                Navigator.of(dialogContext).pop(ThinkingLevel.high),
-            child: _optionRow(
-              dialogContext,
-              ThinkingLevel.high,
-              settings.thinkingLevel == ThinkingLevel.high,
-              '给更多思考预算，适合难题/写作',
+            SimpleDialogOption(
+              onPressed: () =>
+                  Navigator.of(dialogContext).pop(ThinkingLevel.high),
+              child: _optionRow(
+                dialogContext,
+                ThinkingLevel.high,
+                settings.thinkingLevel == ThinkingLevel.high,
+                '给更多思考预算，适合难题/写作',
+              ),
             ),
-          ),
-        ],
-      ),
+          ],
+        );
+      },
     );
     if (level == null || !mounted) return;
     await ref.read(settingsProvider.notifier).setThinkingLevel(level);
@@ -246,26 +287,32 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     bool selected,
     String description,
   ) {
-    final theme = Theme.of(context);
+    // 为什么：选中只换颜色（selBar / ov），图标尺寸用 s.iconSize —— 两种状态
+    // 占位完全一致，行不会因为选中而位移。
+    final s = KeepsakeSkinColors.of(context);
     return Row(
       children: [
         Icon(
           selected ? Icons.check_circle : Icons.circle_outlined,
-          size: 20,
-          color: selected
-              ? theme.colorScheme.primary
-              : theme.colorScheme.outline,
+          size: s.iconSize,
+          color: selected ? s.c.selBar : s.c.ov,
         ),
         const SizedBox(width: 12),
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(level.label, style: theme.textTheme.bodyLarge),
+              Text(
+                level.label,
+                style: Theme.of(
+                  context,
+                ).textTheme.bodyLarge?.copyWith(fontSize: s.fsBody),
+              ),
               Text(
                 description,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  fontSize: s.fsSub,
+                  color: s.c.onV,
                 ),
               ),
             ],
@@ -283,29 +330,33 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final settings = ref.read(settingsProvider);
     final mode = await showDialog<ThemeMode>(
       context: context,
-      builder: (dialogContext) => SimpleDialog(
-        title: const Text('主题'),
-        children: [
-          _themeOption(
-            dialogContext,
-            ThemeMode.system,
-            '跟随系统',
-            settings.themeMode == ThemeMode.system,
-          ),
-          _themeOption(
-            dialogContext,
-            ThemeMode.light,
-            '浅色',
-            settings.themeMode == ThemeMode.light,
-          ),
-          _themeOption(
-            dialogContext,
-            ThemeMode.dark,
-            '深色',
-            settings.themeMode == ThemeMode.dark,
-          ),
-        ],
-      ),
+      builder: (dialogContext) {
+        final s = KeepsakeSkinColors.of(dialogContext);
+        return SimpleDialog(
+          shape: RoundedRectangleBorder(borderRadius: s.rSheet),
+          title: const Text('主题'),
+          children: [
+            _themeOption(
+              dialogContext,
+              ThemeMode.system,
+              '跟随系统',
+              settings.themeMode == ThemeMode.system,
+            ),
+            _themeOption(
+              dialogContext,
+              ThemeMode.light,
+              '浅色',
+              settings.themeMode == ThemeMode.light,
+            ),
+            _themeOption(
+              dialogContext,
+              ThemeMode.dark,
+              '深色',
+              settings.themeMode == ThemeMode.dark,
+            ),
+          ],
+        );
+      },
     );
     if (mode == null || !mounted) return;
     await ref.read(settingsProvider.notifier).setThemeMode(mode);
@@ -317,20 +368,24 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     String label,
     bool selected,
   ) {
-    final theme = Theme.of(context);
+    // 为什么：分段式选中态只允许改颜色，图标尺寸两种状态一致（s.iconSize）。
+    final s = KeepsakeSkinColors.of(context);
     return SimpleDialogOption(
       onPressed: () => Navigator.of(context).pop(value),
       child: Row(
         children: [
           Icon(
             selected ? Icons.check_circle : Icons.circle_outlined,
-            size: 20,
-            color: selected
-                ? theme.colorScheme.primary
-                : theme.colorScheme.outline,
+            size: s.iconSize,
+            color: selected ? s.c.selBar : s.c.ov,
           ),
           const SizedBox(width: 12),
-          Text(label, style: theme.textTheme.bodyLarge),
+          Text(
+            label,
+            style: Theme.of(
+              context,
+            ).textTheme.bodyLarge?.copyWith(fontSize: s.fsBody),
+          ),
         ],
       ),
     );
@@ -356,13 +411,17 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   /// 往注册表追加一条数据。
   Future<void> _skinPicker() async {
     final current = skinById(ref.read(settingsProvider).skinId);
+    // 为什么：底部弹层只圆上两角（s.rSheetTop），底色取皮肤 surface，
+    // 这样 E 的纸面与 A/H 的浅底都不会露出默认 surfaceContainerLow。
+    final s = KeepsakeSkinColors.of(context);
     final picked = await showModalBottomSheet<Skin>(
       context: context,
       barrierColor: Colors.black.withValues(alpha: 0.5),
       isScrollControlled: true,
+      backgroundColor: s.c.surface,
+      shape: RoundedRectangleBorder(borderRadius: s.rSheetTop),
       builder: (sheetContext) {
         final theme = Theme.of(sheetContext);
-        final scheme = theme.colorScheme;
         return SafeArea(
           top: false,
           child: Padding(
@@ -377,14 +436,25 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     width: 32,
                     height: 4,
                     decoration: BoxDecoration(
-                      color: scheme.outlineVariant,
-                      borderRadius: BorderRadius.circular(2),
+                      // 抓手是胶囊，圆角走 s.rPill（不再写死 2）。
+                      color: s.c.ov,
+                      borderRadius: s.rPill,
                     ),
                   ),
                 ),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(20, 6, 20, 12),
-                  child: Text('配色方案', style: theme.textTheme.titleLarge),
+                  child: Text(
+                    '配色方案',
+                    style: theme.textTheme.titleLarge?.copyWith(
+                      // 标题字号 / 字重 / 字距全部来自皮肤（H 更重、E 有字距）。
+                      fontSize: s.fsTitle,
+                      fontWeight: s.titleWeight,
+                      letterSpacing: s.titleLetterSpacing,
+                      fontFamily: s.fontFamily,
+                      color: s.c.onS,
+                    ),
+                  ),
                 ),
                 for (final skin in keepsakeSkins)
                   _SkinRow(
@@ -410,6 +480,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    // 为什么：危险色（清空记忆）与说明文字色都取皮肤 token，
+    // colorScheme.error 在 E 的纸底上偏艳。
+    final s = KeepsakeSkinColors.of(context);
     final settings = ref.watch(settingsProvider);
     final rounds = settings.contextKeepRounds;
     final contextLabel = rounds > 0 ? '上下文：最近 $rounds 轮' : '上下文：不限制';
@@ -436,7 +509,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               onTap: _system,
             ),
             ListTile(
-              leading: const Icon(Icons.compress),
+              leading: Icon(
+                s.icon(
+                  filled: Icons.schedule,
+                  outlined: Icons.schedule_outlined,
+                ),
+              ),
               title: const Text('上下文预算'),
               subtitle: Text(contextLabel),
               onTap: _contextBudget,
@@ -448,7 +526,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               onTap: _thinkingLevel,
             ),
             SwitchListTile(
-              secondary: const Icon(Icons.lightbulb_outline),
+              secondary: Icon(
+                s.icon(
+                  filled: Icons.lightbulb,
+                  outlined: Icons.lightbulb_outline,
+                ),
+              ),
               title: const Text('深度思考'),
               subtitle: const Text('支持深度思考'),
               value: settings.thinkingEnabled,
@@ -456,7 +539,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   ref.read(settingsProvider.notifier).setThinkingEnabled(value),
             ),
             SwitchListTile(
-              secondary: const Icon(Icons.travel_explore),
+              secondary: Icon(
+                s.icon(filled: Icons.language, outlined: Icons.language),
+              ),
               title: const Text('联网搜索'),
               subtitle: const Text('支持联网搜索（DeepSeek 扩展）'),
               value: settings.searchEnabled,
@@ -488,14 +573,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   ref.read(settingsProvider.notifier).setPersonaEnabled(value),
             ),
             ListTile(
-              leading: Icon(
-                Icons.delete_sweep_outlined,
-                color: theme.colorScheme.error,
-              ),
-              title: Text(
-                '清空记忆数据',
-                style: TextStyle(color: theme.colorScheme.error),
-              ),
+              leading: Icon(Icons.delete_sweep_outlined, color: s.c.errC),
+              title: Text('清空记忆数据', style: TextStyle(color: s.c.errC)),
               subtitle: const Text('只清整理出的记忆，聊天原文全部保留'),
               onTap: _clearMemory,
             ),
@@ -534,9 +613,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
               child: Text(
                 '数据全部存在本机',
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
-                ),
+                style: theme.textTheme.bodySmall?.copyWith(color: s.c.onV),
               ),
             ),
             ListTile(
@@ -578,6 +655,8 @@ class _BackgroundTasksSection extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
+    // 为什么：失败色 / 说明文字色取皮肤 token（E 的纸底上 colorScheme.error 偏艳）。
+    final s = KeepsakeSkinColors.of(context);
     final ImportProgress? progress = ref.watch(importProgressProvider).value;
     final CardBackfillProgress backfill = ref.watch(cardBackfillProvider);
 
@@ -589,7 +668,7 @@ class _BackgroundTasksSection extends ConsumerWidget {
             progress.running
                 ? Icons.cloud_download_outlined
                 : Icons.error_outline,
-            color: progress.running ? null : theme.colorScheme.error,
+            color: progress.running ? null : s.c.errC,
           ),
           title: Text(
             progress.running ? progress.label : '有 ${progress.failed} 条没导上',
@@ -618,9 +697,7 @@ class _BackgroundTasksSection extends ConsumerWidget {
         padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
         child: Text(
           '没有正在运行的后台任务',
-          style: theme.textTheme.bodySmall?.copyWith(
-            color: theme.colorScheme.onSurfaceVariant,
-          ),
+          style: theme.textTheme.bodySmall?.copyWith(color: s.c.onV),
         ),
       );
     }
@@ -634,9 +711,7 @@ class _BackgroundTasksSection extends ConsumerWidget {
           padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
           child: Text(
             '切到后台可能被系统暂停，回到 App 会自动续跑',
-            style: theme.textTheme.labelSmall?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
-            ),
+            style: theme.textTheme.labelSmall?.copyWith(color: s.c.onV),
           ),
         ),
       ],
@@ -654,6 +729,8 @@ class _ProgressBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    // 为什么：进度条是胶囊形，圆角走 s.rPill；说明文字用皮肤次要字色。
+    final s = KeepsakeSkinColors.of(context);
     final text = caption;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -662,7 +739,7 @@ class _ProgressBar extends StatelessWidget {
         LinearProgressIndicator(
           value: fraction,
           minHeight: 3,
-          borderRadius: BorderRadius.circular(2),
+          borderRadius: s.rPill,
         ),
         if (text != null && text.isNotEmpty)
           Padding(
@@ -671,9 +748,7 @@ class _ProgressBar extends StatelessWidget {
               text,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
-              ),
+              style: theme.textTheme.bodySmall?.copyWith(color: s.c.onV),
             ),
           ),
       ],
@@ -690,13 +765,17 @@ class _SectionTitle extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    // 为什么：分组标题的字重 / 字距由皮肤决定（A 600、E/H 700，E 还带 1% 字距）。
+    final s = KeepsakeSkinColors.of(context);
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 20, 16, 6),
       child: Text(
         title,
         style: theme.textTheme.labelLarge?.copyWith(
           color: theme.colorScheme.primary,
-          fontWeight: FontWeight.w700,
+          fontWeight: s.titleWeight,
+          letterSpacing: s.titleLetterSpacing,
+          fontFamily: s.fontFamily,
         ),
       ),
     );
@@ -735,15 +814,19 @@ class _AboutTileState extends State<_AboutTile> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    // 为什么：头像底/前景与圆角/图标尺寸都用皮肤 token —— E 是方角描边、
+    // A/H 是正圆，写死 CircleAvatar 会让 E 变成圆头像。
+    final s = KeepsakeSkinColors.of(context);
     final version = _version;
     return ListTile(
-      leading: CircleAvatar(
-        backgroundColor: theme.colorScheme.primaryContainer,
-        child: Icon(
-          Icons.album_outlined,
-          color: theme.colorScheme.onPrimaryContainer,
+      leading: Container(
+        width: 40,
+        height: 40,
+        decoration: BoxDecoration(
+          color: s.c.avBg,
+          borderRadius: s.rAvatar,
         ),
+        child: Icon(Icons.album_outlined, size: s.iconSize, color: s.c.avFg),
       ),
       title: const Text('Keepsake（留声）'),
       subtitle: Text(version == null ? '数据全部存在本机' : '版本 $version · 数据全部存在本机'),
@@ -830,20 +913,30 @@ class _UpdateTileState extends State<_UpdateTile> {
     final String url = manualUrl ?? UpdateService.manualUrl;
     final bool? open = await showDialog<bool>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('更新没有走通'),
-        content: Text(message),
-        actions: <Widget>[
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('知道了'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('在浏览器打开'),
-          ),
-        ],
-      ),
+      builder: (dialogContext) {
+        final s = KeepsakeSkinColors.of(dialogContext);
+        return AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: s.rSheet),
+          title: const Text('更新没有走通'),
+          content: Text(message),
+          actions: <Widget>[
+            TextButton(
+              style: TextButton.styleFrom(
+                minimumSize: const Size(64, KeepsakeTheme.sheetButtonHeight),
+              ),
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('知道了'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(
+                minimumSize: const Size(64, KeepsakeTheme.sheetButtonHeight),
+              ),
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('在浏览器打开'),
+            ),
+          ],
+        );
+      },
     );
     if (open == true) await _openInBrowser(url);
   }
@@ -868,7 +961,9 @@ class _UpdateTileState extends State<_UpdateTile> {
       context: context,
       builder: (dialogContext) {
         final theme = Theme.of(dialogContext);
+        final s = KeepsakeSkinColors.of(dialogContext);
         return AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: s.rSheet),
           title: Text('发现新版本 ${info.latest}'),
           content: SizedBox(
             width: 420,
@@ -878,9 +973,7 @@ class _UpdateTileState extends State<_UpdateTile> {
               children: [
                 Text(
                   '当前版本 ${info.current}',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
-                  ),
+                  style: theme.textTheme.bodySmall?.copyWith(color: s.c.onV),
                 ),
                 if (notes.isNotEmpty) ...[
                   const SizedBox(height: 8),
@@ -889,7 +982,9 @@ class _UpdateTileState extends State<_UpdateTile> {
                     child: SingleChildScrollView(
                       child: Text(
                         notes,
-                        style: theme.textTheme.bodySmall,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: s.c.onV,
+                        ),
                       ),
                     ),
                   ),
@@ -899,7 +994,7 @@ class _UpdateTileState extends State<_UpdateTile> {
                   Text(
                     '这个版本没有附带 APK，请到 Release 页面手动下载。',
                     style: theme.textTheme.bodySmall?.copyWith(
-                      color: theme.colorScheme.error,
+                      color: s.c.errC,
                     ),
                   ),
                 ],
@@ -908,10 +1003,16 @@ class _UpdateTileState extends State<_UpdateTile> {
           ),
           actions: [
             TextButton(
+              style: TextButton.styleFrom(
+                minimumSize: const Size(64, KeepsakeTheme.sheetButtonHeight),
+              ),
               onPressed: () => Navigator.of(dialogContext).pop(false),
               child: const Text('稍后'),
             ),
             FilledButton(
+              style: FilledButton.styleFrom(
+                minimumSize: const Size(64, KeepsakeTheme.sheetButtonHeight),
+              ),
               onPressed: info.apkUrl == null
                   ? null
                   : () => Navigator.of(dialogContext).pop(true),
@@ -941,32 +1042,40 @@ class _UpdateTileState extends State<_UpdateTile> {
       showDialog<void>(
         context: context,
         barrierDismissible: false,
-        builder: (dialogContext) => AlertDialog(
-          title: const Text('下载更新'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              ValueListenableBuilder<double?>(
-                valueListenable: fraction,
-                builder: (context, value, child) => LinearProgressIndicator(
-                  value: value,
-                  minHeight: 4,
-                  borderRadius: BorderRadius.circular(2),
+        builder: (dialogContext) {
+          final s = KeepsakeSkinColors.of(dialogContext);
+          return AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: s.rSheet),
+            title: const Text('下载更新'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                ValueListenableBuilder<double?>(
+                  valueListenable: fraction,
+                  builder: (context, value, child) =>
+                      LinearProgressIndicator(
+                        value: value,
+                        minHeight: 4,
+                        // 为什么：进度条是胶囊形，圆角走 s.rPill。
+                        borderRadius: s.rPill,
+                      ),
                 ),
-              ),
-              const SizedBox(height: 12),
-              ValueListenableBuilder<String>(
-                valueListenable: status,
-                builder: (context, value, child) => Text(
-                  value,
-                  style: Theme.of(dialogContext).textTheme.bodySmall,
+                const SizedBox(height: 12),
+                ValueListenableBuilder<String>(
+                  valueListenable: status,
+                  builder: (context, value, child) => Text(
+                    value,
+                    style: Theme.of(
+                      dialogContext,
+                    ).textTheme.bodySmall?.copyWith(color: s.c.onV),
+                  ),
                 ),
-              ),
-            ],
-          ),
-          actions: const <Widget>[],
-        ),
+              ],
+            ),
+            actions: const <Widget>[],
+          );
+        },
       ),
     );
 
@@ -1024,24 +1133,37 @@ class _UpdateTileState extends State<_UpdateTile> {
     if (!mounted) return null;
     return showDialog<String>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('安装被系统拦住了'),
-        content: Text(message),
-        actions: <Widget>[
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('取消'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop('settings'),
-            child: const Text('去设置'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(dialogContext).pop('browser'),
-            child: const Text('在浏览器打开'),
-          ),
-        ],
-      ),
+      builder: (dialogContext) {
+        final s = KeepsakeSkinColors.of(dialogContext);
+        return AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: s.rSheet),
+          title: const Text('安装被系统拦住了'),
+          content: Text(message),
+          actions: <Widget>[
+            TextButton(
+              style: TextButton.styleFrom(
+                minimumSize: const Size(64, KeepsakeTheme.sheetButtonHeight),
+              ),
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('取消'),
+            ),
+            TextButton(
+              style: TextButton.styleFrom(
+                minimumSize: const Size(64, KeepsakeTheme.sheetButtonHeight),
+              ),
+              onPressed: () => Navigator.of(dialogContext).pop('settings'),
+              child: const Text('去设置'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(
+                minimumSize: const Size(64, KeepsakeTheme.sheetButtonHeight),
+              ),
+              onPressed: () => Navigator.of(dialogContext).pop('browser'),
+              child: const Text('在浏览器打开'),
+            ),
+          ],
+        );
+      },
     );
   }
 
@@ -1078,7 +1200,8 @@ class _UpdateTileState extends State<_UpdateTile> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    // 为什么：有新版的红点用皮肤错误色（errC），不写死 colorScheme.error。
+    final s = KeepsakeSkinColors.of(context);
     final current = _current;
     final pending = _pending;
     final subtitle = current == null
@@ -1100,7 +1223,7 @@ class _UpdateTileState extends State<_UpdateTile> {
               width: 10,
               height: 10,
               decoration: BoxDecoration(
-                color: theme.colorScheme.error,
+                color: s.c.errC,
                 shape: BoxShape.circle,
               ),
             )
@@ -1129,76 +1252,102 @@ class _SkinRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
+    // 为什么：整行外观（高度 / 字号 / 圆角 / 图标尺寸 / 选中色）都来自当前皮肤
+    // token —— 三套皮肤共用这一份代码，只在弹层里就地预览各自的色块。
+    final s = KeepsakeSkinColors.of(context);
     final swatches = skin.swatches;
     return Material(
-      // 选中只改底色（不改变行高与内边距）。
-      color: selected ? scheme.primaryContainer : Colors.transparent,
+      // 选中只改底色与左侧竖条，不改 margin / padding / 行高 / 字号 / 图标尺寸，
+      // 所以选中不会让标题和说明发生位移。
+      color: selected ? s.selectionBg : Colors.transparent,
       child: InkWell(
         onTap: onTap,
         child: SizedBox(
-          height: 64,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-            child: Row(
-              children: <Widget>[
-                // 色块预览：宽 56 = 3×16 + 2×4 间距。
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: <Widget>[
-                    for (var i = 0; i < swatches.length; i++)
-                      Container(
-                        width: 16,
-                        height: 20,
-                        margin: EdgeInsets.only(
-                          right: i == swatches.length - 1 ? 0 : 4,
-                        ),
-                        decoration: BoxDecoration(
-                          color: swatches[i],
-                          borderRadius: BorderRadius.circular(4),
-                          border: Border.all(color: scheme.outlineVariant),
-                        ),
-                      ),
-                  ],
-                ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    crossAxisAlignment: CrossAxisAlignment.start,
+          height: KeepsakeTheme.settingsRowHeight,
+          child: Row(
+            children: <Widget>[
+              // 选中竖条：两种状态都占 3 宽，未选中时透明（不改变排布）。
+              Container(
+                width: 3,
+                color: selected ? s.selectionBar : Colors.transparent,
+              ),
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 17,
+                    vertical: 10,
+                  ),
+                  child: Row(
                     children: <Widget>[
-                      Text(
-                        skin.name,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.bodyLarge?.copyWith(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
-                          color: selected
-                              ? scheme.onPrimaryContainer
-                              : scheme.onSurface,
+                      // 色块预览：宽 56 = 3×16 + 2×4 间距。
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: <Widget>[
+                          for (var i = 0; i < swatches.length; i++)
+                            Container(
+                              width: 16,
+                              height: 20,
+                              margin: EdgeInsets.only(
+                                right: i == swatches.length - 1 ? 0 : 4,
+                              ),
+                              decoration: BoxDecoration(
+                                // 色块来自注册表（已按新 token），圆角走 s.rCb。
+                                color: swatches[i],
+                                borderRadius: s.rCb,
+                                border: Border.all(color: s.c.ov),
+                              ),
+                            ),
+                        ],
+                      ),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: <Widget>[
+                            Text(
+                              skin.name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.bodyLarge?.copyWith(
+                                fontSize: s.fsTitle,
+                                fontWeight: s.titleWeight,
+                                letterSpacing: s.titleLetterSpacing,
+                                fontFamily: s.fontFamily,
+                                color: s.c.onS,
+                              ),
+                            ),
+                            Text(
+                              skin.description,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                fontFamily: s.metaFontFamily,
+                                fontSize: s.fsSub,
+                                color: s.c.onV,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
-                      Text(
-                        skin.description,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          fontSize: 13,
-                          color: scheme.onSurfaceVariant,
-                        ),
+                      // 勾选位：两种状态都占位（s.iconSize 见方），只换可见性，
+                      // 所以选中时标题不会因为多出一个图标而左移。
+                      SizedBox(
+                        width: s.iconSize,
+                        height: s.iconSize,
+                        child: selected
+                            ? Icon(
+                                Icons.check,
+                                size: s.iconSize,
+                                color: s.c.onS,
+                              )
+                            : null,
                       ),
                     ],
                   ),
                 ),
-                if (selected)
-                  Icon(
-                    Icons.check,
-                    size: 20,
-                    color: scheme.onPrimaryContainer,
-                  ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       ),

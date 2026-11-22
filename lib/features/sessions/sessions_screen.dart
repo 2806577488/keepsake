@@ -425,6 +425,7 @@ class _SessionsScreenState extends ConsumerState<SessionsScreen> {
   /// 所以默认动作改成先落盘，再用文件管理器发送。
   Future<void> _exportSelected() async {
     if (_selectedIds.isEmpty || _exporting) return;
+    final s = KeepsakeSkinColors.of(context);
     final List<String> ids = _selectedIds.toList(growable: false);
     final String? mode = await showModalBottomSheet<String>(
       context: context,
@@ -447,7 +448,9 @@ class _SessionsScreenState extends ConsumerState<SessionsScreen> {
             ),
             const Divider(height: 1),
             ListTile(
-              leading: const Icon(Icons.close),
+              leading: Icon(
+                s.icon(filled: Icons.close, outlined: Icons.close),
+              ),
               title: const Text('取消'),
               onTap: () => Navigator.of(sheetContext).pop(),
             ),
@@ -571,6 +574,7 @@ class _SessionsScreenState extends ConsumerState<SessionsScreen> {
 
   Future<void> _showSessionActions(Session session) async {
     final pinned = isSessionPinned(session);
+    final s = KeepsakeSkinColors.of(context);
     final action = await showModalBottomSheet<String>(
       context: context,
       showDragHandle: true,
@@ -601,7 +605,10 @@ class _SessionsScreenState extends ConsumerState<SessionsScreen> {
             ),
             ListTile(
               leading: Icon(
-                Icons.delete_outline,
+                s.icon(
+                  filled: Icons.delete_outline,
+                  outlined: Icons.delete_outline,
+                ),
                 color: Theme.of(sheetContext).colorScheme.error,
               ),
               title: Text(
@@ -678,31 +685,46 @@ class _SessionsScreenState extends ConsumerState<SessionsScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    // 皮肤 token 入口：只有这一份 UI，A/E/H 靠 token 变形（拍板稿 §1）。
+    final s = KeepsakeSkinColors.of(context);
     final sessions =
         ref.watch(orderedSessionsProvider).value ?? const <Session>[];
     return Scaffold(
       appBar: AppBar(
         automaticallyImplyLeading: false,
         titleSpacing: _searching ? 0 : null,
+        // 顶栏图标统一跟皮肤：尺寸 s.iconSize（H = 26）、颜色 s.iconColor（H 深青）。
         leading: _searching
             ? IconButton(
                 tooltip: '返回',
-                icon: const Icon(Icons.arrow_back),
+                icon: Icon(
+                  s.icon(filled: Icons.arrow_back, outlined: Icons.arrow_back),
+                  size: s.iconSize,
+                  color: s.iconColor,
+                ),
                 onPressed: _closeSearch,
               )
             : _selecting
             ? IconButton(
                 tooltip: '退出多选',
-                icon: const Icon(Icons.close),
+                icon: Icon(
+                  s.icon(filled: Icons.close, outlined: Icons.close),
+                  size: s.iconSize,
+                  color: s.iconColor,
+                ),
                 onPressed: _exitSelection,
               )
             : IconButton(
                 tooltip: '多选（删除 / 导出）',
-                icon: const Icon(Icons.checklist_rounded),
+                icon: Icon(
+                  s.icon(filled: Icons.checklist, outlined: Icons.checklist),
+                  size: s.iconSize,
+                  color: s.iconColor,
+                ),
                 onPressed: _enterSelection,
               ),
         title: _searching
-            ? _buildSearchField(theme)
+            ? _buildSearchField(theme, s)
             : _selecting
             // 多选顶栏「已选 N」20/600（README §4.6）。
             ? Text(
@@ -716,8 +738,12 @@ class _SessionsScreenState extends ConsumerState<SessionsScreen> {
                 if (_searchController.text.isNotEmpty)
                   IconButton(
                     tooltip: '清空',
-                    // §6：清空用 Material 图标 24。
-                    icon: const Icon(Icons.close, size: KeepsakeTheme.iconSize),
+                    // §6：清空用 Material 图标；尺寸/颜色跟皮肤。
+                    icon: Icon(
+                      s.icon(filled: Icons.close, outlined: Icons.close),
+                      size: s.iconSize,
+                      color: s.iconColor,
+                    ),
                     onPressed: () {
                       _searchController.clear();
                       _onSearchChanged('');
@@ -730,14 +756,22 @@ class _SessionsScreenState extends ConsumerState<SessionsScreen> {
             : [
                 IconButton(
                   tooltip: '搜索',
-                  icon: const Icon(Icons.search, size: KeepsakeTheme.iconSize),
+                  icon: Icon(
+                    s.icon(filled: Icons.search, outlined: Icons.search),
+                    size: s.iconSize,
+                    color: s.iconColor,
+                  ),
                   onPressed: _openSearch,
                 ),
                 IconButton(
                   tooltip: '设置',
-                  icon: const Icon(
-                    Icons.settings_outlined,
-                    size: KeepsakeTheme.iconSize,
+                  icon: Icon(
+                    s.icon(
+                      filled: Icons.settings,
+                      outlined: Icons.settings_outlined,
+                    ),
+                    size: s.iconSize,
+                    color: s.iconColor,
                   ),
                   onPressed: () => Navigator.of(context).push<void>(
                     MaterialPageRoute<void>(
@@ -759,7 +793,7 @@ class _SessionsScreenState extends ConsumerState<SessionsScreen> {
           ],
         ),
       ),
-      // FAB：高 56 / 圆 16 / 1px 描边 / 无投影（README §4.1、§7）。
+      // FAB：高 56 / 圆角按皮肤 rFab / 实心零描边 / 无投影（README §4.1、§7）。
       floatingActionButton: _searching || _selecting
           ? null
           : _NewSessionFab(creating: _creating, onTap: _newSession),
@@ -768,50 +802,57 @@ class _SessionsScreenState extends ConsumerState<SessionsScreen> {
 
   /// 选择态的 AppBar 按钮：全选/全不选、导出、删除（README §4.6、§6）。
   List<Widget> _buildSelectionActions(List<Session> sessions) {
+    final s = KeepsakeSkinColors.of(context);
     final allSelected =
         sessions.isNotEmpty && _selectedIds.length == sessions.length;
     final empty = _selectedIds.isEmpty;
     return <Widget>[
       IconButton(
         tooltip: allSelected ? '全不选' : '全选',
-        // §6：多选全选 `Icons.select_all`，24。
+        // §6：多选全选 `Icons.select_all`；尺寸/颜色跟皮肤。
         icon: Icon(
           allSelected ? Icons.deselect : Icons.select_all,
-          size: KeepsakeTheme.iconSize,
+          size: s.iconSize,
+          color: s.iconColor,
         ),
         onPressed: () => _toggleSelectAll(sessions),
       ),
       IconButton(
         tooltip: '导出选中',
-        // §6：多选导出 `Icons.file_upload_outlined`，24。
+        // §6：多选导出按 icons.md 的「导出 / 打开」行取 open_in_new；尺寸/颜色跟皮肤。
         icon: _exporting
             ? const SizedBox(
                 width: 18,
                 height: 18,
                 child: CircularProgressIndicator(strokeWidth: 2),
               )
-            : const Icon(
-                Icons.file_upload_outlined,
-                size: KeepsakeTheme.iconSize,
+            : Icon(
+                s.icon(
+                  filled: Icons.open_in_new,
+                  outlined: Icons.open_in_new,
+                ),
+                size: s.iconSize,
+                color: s.iconColor,
               ),
         onPressed: empty || _exporting ? null : _exportSelected,
       ),
       IconButton(
         tooltip: '删除选中',
-        // §6：多选删除 `Icons.delete_outline` 24，色 #BA1A1A（scheme.error）。
+        // §6：多选删除 `Icons.delete_outline`，色 #BA1A1A（scheme.error）。
         icon: Icon(
-          Icons.delete_outline,
-          size: KeepsakeTheme.iconSize,
-          color: empty ? Theme.of(context).colorScheme.error.withValues(
-            alpha: 0.4,
-          ) : Theme.of(context).colorScheme.error,
+          s.icon(filled: Icons.delete_outline, outlined: Icons.delete_outline),
+          size: s.iconSize,
+          color: empty
+              ? Theme.of(context).colorScheme.error.withValues(alpha: 0.4)
+              : Theme.of(context).colorScheme.error,
         ),
         onPressed: empty ? null : () => _deleteSelected(sessions),
       ),
     ];
   }
 
-  Widget _buildSearchField(ThemeData theme) {
+  /// 搜索输入框：圆角跟皮肤 rField（A 胶囊 / E 6 / H 12）、min 高 48（拍板稿 §2）。
+  Widget _buildSearchField(ThemeData theme, KeepsakeSkinColors s) {
     return TextField(
       controller: _searchController,
       focusNode: _searchFocus,
@@ -820,10 +861,13 @@ class _SessionsScreenState extends ConsumerState<SessionsScreen> {
       onChanged: _onSearchChanged,
       decoration: InputDecoration(
         hintText: '搜索标题或聊天内容',
-        border: InputBorder.none,
-        hintStyle: theme.textTheme.bodyLarge?.copyWith(
-          color: theme.colorScheme.onSurfaceVariant,
+        // 走 inputDecorationTheme 的 filled/highest 底，只按皮肤换成 rField 圆角。
+        border: OutlineInputBorder(
+          borderRadius: s.rField,
+          borderSide: BorderSide.none,
         ),
+        constraints: const BoxConstraints(minHeight: KeepsakeTheme.inputHeight),
+        hintStyle: theme.textTheme.bodyLarge?.copyWith(color: s.c.onV),
       ),
       style: theme.textTheme.bodyLarge,
     );
@@ -854,6 +898,7 @@ class _SessionsScreenState extends ConsumerState<SessionsScreen> {
   }
 
   Widget _buildSessionTile(ThemeData theme, Session session) {
+    final skin = KeepsakeSkinColors.of(context);
     final pinned = isSessionPinned(session);
     final selected = _selecting && _selectedIds.contains(session.id);
     return Dismissible(
@@ -867,7 +912,10 @@ class _SessionsScreenState extends ConsumerState<SessionsScreen> {
         alignment: Alignment.centerRight,
         padding: const EdgeInsets.only(right: 24),
         child: Icon(
-          Icons.delete_outline,
+          skin.icon(
+            filled: Icons.delete_outline,
+            outlined: Icons.delete_outline,
+          ),
           color: theme.colorScheme.onErrorContainer,
         ),
       ),
@@ -948,8 +996,6 @@ class _SessionRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
     final skin = KeepsakeSkinColors.of(context);
     return Material(
       color: selected ? skin.selectionBg : Colors.transparent,
@@ -961,7 +1007,8 @@ class _SessionRow extends StatelessWidget {
           height: KeepsakeTheme.listRowHeight,
           child: Stack(
             children: <Widget>[
-              // 选中竖条 2px primary（§4.6），覆盖在左内边距上。
+              // 选中竖条 2px（拍板稿定稿宽度 2），颜色 s.selectionBar，
+              // 用 Positioned 覆盖在左内边距上，不占布局宽度。
               if (selected)
                 Positioned(
                   left: 0,
@@ -990,6 +1037,7 @@ class _SessionRow extends StatelessWidget {
                                 child: Checkbox(
                                   value: selected,
                                   onChanged: (_) => onToggleSelected(),
+                                  // 圆角与选中色都由 checkboxTheme 给，页面不写圆角。
                                   materialTapTargetSize:
                                       MaterialTapTargetSize.shrinkWrap,
                                   visualDensity: VisualDensity.compact,
@@ -1005,27 +1053,36 @@ class _SessionRow extends StatelessWidget {
                         mainAxisAlignment: MainAxisAlignment.center,
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: <Widget>[
-                          // 标题 15/600 单行省略（§4.1）。
+                          // 标题：字号 / 字重 / 字距全按皮肤（A w600、E/H w700）。
                           Text(
                             title,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: theme.textTheme.bodyLarge?.copyWith(
-                              fontWeight: FontWeight.w600,
-                              color: selected ? skin.onSelection : null,
-                            ),
+                            style: Theme.of(context).textTheme.bodyLarge
+                                ?.copyWith(
+                                  fontSize: skin.fsTitle,
+                                  fontWeight: skin.titleWeight,
+                                  letterSpacing: skin.titleLetterSpacing,
+                                  color: selected
+                                      ? skin.onSelection
+                                      : skin.c.onS,
+                                ),
                           ),
-                          // 副标题 13，与标题间距 2（§4.1）。
-                          const SizedBox(height: 2),
+                          // 标题↔元信息间距 5（拍板稿 §1 定稿，原为 2）。
+                          const SizedBox(height: 5),
+                          // 元信息：fsSub + E 走等宽（A/H metaFontFamily 为 null 不设）。
                           Text(
                             subtitle,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: theme.textTheme.bodyMedium?.copyWith(
-                              color: selected
-                                  ? skin.onSelection
-                                  : scheme.onSurfaceVariant,
-                            ),
+                            style: Theme.of(context).textTheme.bodyMedium
+                                ?.copyWith(
+                                  fontSize: skin.fsSub,
+                                  fontFamily: skin.metaFontFamily,
+                                  color: selected
+                                      ? skin.onSelection
+                                      : skin.c.onV,
+                                ),
                           ),
                         ],
                       ),
@@ -1036,8 +1093,11 @@ class _SessionRow extends StatelessWidget {
                         // 更多图标 18（§4.1）。
                         iconSize: 18,
                         icon: Icon(
-                          Icons.more_vert,
-                          color: scheme.onSurfaceVariant,
+                          skin.icon(
+                            filled: Icons.more_vert,
+                            outlined: Icons.more_vert,
+                          ),
+                          color: skin.c.onV,
                         ),
                         onPressed: onMore,
                       ),
@@ -1052,8 +1112,8 @@ class _SessionRow extends StatelessWidget {
   }
 }
 
-/// 会话行头像（34 圆 / 字 15）：置顶用 primaryContainer 底，其余用皮肤
-/// `listAvatar` 底（README §4.1 + §0）。
+/// 会话行头像（34 / 字 15）：圆角跟皮肤 rAvatar（E = 0 方角，A/H = 17 正圆）；
+/// 置顶用 primaryContainer 底，其余用皮肤 `listAvatar` 底（README §4.1 + §0）。
 class _SessionAvatar extends StatelessWidget {
   const _SessionAvatar({required this.pinned});
 
@@ -1068,7 +1128,8 @@ class _SessionAvatar extends StatelessWidget {
       height: KeepsakeTheme.listAvatarSize,
       decoration: BoxDecoration(
         color: pinned ? scheme.primaryContainer : skin.listAvatarBg,
-        shape: BoxShape.circle,
+        // 形状跟皮肤：不再写死 BoxShape.circle，靠 rAvatar 变形。
+        borderRadius: skin.rAvatar,
       ),
       child: Icon(
         pinned ? Icons.push_pin : Icons.chat_bubble_outline,
@@ -1079,7 +1140,8 @@ class _SessionAvatar extends StatelessWidget {
   }
 }
 
-/// 新对话按钮（README §4.1、§7）：高 56、左右 20、圆 16、1px 描边、无投影。
+/// 新对话按钮（README §4.1、§7）：高 56、左右 20、圆角按皮肤 rFab、
+/// `pC` 实心零描边、无投影。
 class _NewSessionFab extends StatelessWidget {
   const _NewSessionFab({required this.creating, required this.onTap});
 
@@ -1088,7 +1150,6 @@ class _NewSessionFab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
     final skin = KeepsakeSkinColors.of(context);
     return GestureDetector(
       onTap: creating ? null : onTap,
@@ -1096,10 +1157,9 @@ class _NewSessionFab extends StatelessWidget {
         height: KeepsakeTheme.fabHeight,
         padding: const EdgeInsets.symmetric(horizontal: 20),
         decoration: BoxDecoration(
-          color: scheme.primaryContainer,
-          borderRadius: BorderRadius.circular(KeepsakeTheme.fabRadius),
-          // 1px 描边 #8CCDBB（皮肤可覆盖）；不能有 elevation。
-          border: Border.all(width: 1, color: skin.fabBorder),
+          // FAB 改成 pC 实心 + 零描边（旧 fabBorder 已从 token 层删除）。
+          color: skin.c.pC,
+          borderRadius: skin.rFab,
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
@@ -1110,22 +1170,24 @@ class _NewSessionFab extends StatelessWidget {
                 height: 20,
                 child: CircularProgressIndicator(
                   strokeWidth: 2,
-                  color: scheme.onPrimaryContainer,
+                  color: skin.c.onPC,
                 ),
               )
             else
+              // 图标尺寸跟皮肤（H = 26），色 onPC。
               Icon(
-                Icons.add,
-                size: 20,
-                color: scheme.onPrimaryContainer,
+                skin.icon(filled: Icons.add, outlined: Icons.add),
+                size: skin.iconSize,
+                color: skin.c.onPC,
               ),
             const SizedBox(width: 8),
             Text(
               '新对话',
               style: TextStyle(
-                fontSize: 15,
-                fontWeight: FontWeight.w600,
-                color: scheme.onPrimaryContainer,
+                // 字号 / 字重跟皮肤（A fsBody 15 w600、H fsBody 16 w700）。
+                fontSize: skin.fsBody,
+                fontWeight: skin.titleWeight,
+                color: skin.c.onPC,
               ),
             ),
           ],
@@ -1202,71 +1264,87 @@ class _ImportProgressBannerState extends ConsumerState<_ImportProgressBanner> {
     if (!showRunning && !showFailures) return const SizedBox.shrink();
 
     final theme = Theme.of(context);
+    final skin = KeepsakeSkinColors.of(context);
     final subtitle = progress.currentTitle;
-    return Material(
-      color: theme.colorScheme.surfaceContainerHigh,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 10, 8, 10),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Expanded(
+    // 导入横幅当卡片处理：rCard + hairlineBorder（只有 E 会画 1px 描边）。
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+      child: Container(
+        decoration: BoxDecoration(
+          color: skin.c.high,
+          borderRadius: skin.rCard,
+          border: skin.hairlineBorder,
+        ),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 10, 8, 10),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      showFailures
+                          ? '有 ${progress.failed} 条没导上'
+                          : progress.label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodyMedium,
+                    ),
+                  ),
+                  if (showFailures)
+                    TextButton(
+                      onPressed: _retryFailed,
+                      child: const Text('重试没导上的'),
+                    )
+                  else
+                    TextButton(onPressed: _cancel, child: const Text('取消')),
+                  // 运行中不给「关闭」（进度条应一直可见，取消请用左侧按钮）。
+                  if (showFailures)
+                    IconButton(
+                      tooltip: '关闭',
+                      icon: Icon(
+                        skin.icon(filled: Icons.close, outlined: Icons.close),
+                        size: skin.iconSize,
+                        color: skin.iconColor,
+                      ),
+                      onPressed: () => setState(() => _dismissed = true),
+                    ),
+                ],
+              ),
+              if (showRunning)
+                LinearProgressIndicator(
+                  value: progress.fraction,
+                  minHeight: 3,
+                  // 进度条两端圆角走皮肤 rPill，页面不写死数值。
+                  borderRadius: skin.rPill,
+                ),
+              if (showRunning && subtitle != null && subtitle.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
                   child: Text(
-                    showFailures ? '有 ${progress.failed} 条没导上' : progress.label,
+                    subtitle,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.bodyMedium,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: skin.c.onV,
+                    ),
                   ),
                 ),
-                if (showFailures)
-                  TextButton(
-                    onPressed: _retryFailed,
-                    child: const Text('重试没导上的'),
-                  )
-                else
-                  TextButton(onPressed: _cancel, child: const Text('取消')),
-                // 运行中不给「关闭」（进度条应一直可见，取消请用左侧按钮）。
-                if (showFailures)
-                  IconButton(
-                    tooltip: '关闭',
-                    icon: const Icon(Icons.close, size: 20),
-                    onPressed: () => setState(() => _dismissed = true),
-                  ),
-              ],
-            ),
-            if (showRunning)
-              LinearProgressIndicator(
-                value: progress.fraction,
-                minHeight: 3,
-                borderRadius: BorderRadius.circular(2),
-              ),
-            if (showRunning && subtitle != null && subtitle.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(top: 4),
-                child: Text(
-                  subtitle,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
+              // M1（轻量版）：没有前台服务，国产 ROM 会把后台任务冻结/杀掉；
+              // 这里明示「可续跑」，避免用户以为进度卡死、反复杀 App 重开。
+              if (showRunning)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text(
+                    '切到后台可能被系统暂停，回到 App 会自动续跑',
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: skin.c.onV,
+                    ),
                   ),
                 ),
-              ),
-            // M1（轻量版）：没有前台服务，国产 ROM 会把后台任务冻结/杀掉；
-            // 这里明示「可续跑」，避免用户以为进度卡死、反复杀 App 重开。
-            if (showRunning)
-              Padding(
-                padding: const EdgeInsets.only(top: 4),
-                child: Text(
-                  '切到后台可能被系统暂停，回到 App 会自动续跑',
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
-                  ),
-                ),
-              ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -1364,30 +1442,49 @@ class _SearchResults extends ConsumerWidget {
     );
   }
 
+  /// 命中行做成卡片：rCard + hairlineBorder（只有 E 会画 1px 描边，A/H 无线）。
+  Widget _hitCard(BuildContext context, Widget child) {
+    final skin = KeepsakeSkinColors.of(context);
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+      decoration: BoxDecoration(
+        borderRadius: skin.rCard,
+        border: skin.hairlineBorder,
+      ),
+      child: child,
+    );
+  }
+
   Widget _buildHit(BuildContext context, SessionSearchHit hit, String query) {
     final theme = Theme.of(context);
+    final skin = KeepsakeSkinColors.of(context);
     final sessionTitle = hit.sessionTitle.trim().isEmpty
         ? '未命名会话'
         : hit.sessionTitle.trim();
 
     // 会话标题命中（`searchSessions` 里 messageId == '' 的条目）。
     if (hit.isTitleHit) {
-      return ListTile(
-        leading: const Icon(Icons.title),
-        title: Text(sessionTitle, maxLines: 2, overflow: TextOverflow.ellipsis),
-        subtitle: Text(
-          '标题匹配 · ${_relativeTime(hit.sessionUpdatedAt)}',
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: theme.textTheme.bodySmall?.copyWith(
-            color: theme.colorScheme.onSurfaceVariant,
+      return _hitCard(
+        context,
+        ListTile(
+          leading: const Icon(Icons.title),
+          title: Text(
+            sessionTitle,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
           ),
-        ),
-        onTap: () => Navigator.of(context).push<void>(
-          MaterialPageRoute<void>(
-            builder: (_) => ChatScreen(
-              sessionId: hit.sessionId,
-              initialTitle: sessionTitle,
+          subtitle: Text(
+            '标题匹配 · ${_relativeTime(hit.sessionUpdatedAt)}',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.bodySmall?.copyWith(color: skin.c.onV),
+          ),
+          onTap: () => Navigator.of(context).push<void>(
+            MaterialPageRoute<void>(
+              builder: (_) => ChatScreen(
+                sessionId: hit.sessionId,
+                initialTitle: sessionTitle,
+              ),
             ),
           ),
         ),
@@ -1403,25 +1500,26 @@ class _SearchResults extends ConsumerWidget {
       ..write(sessionTitle)
       ..write(' · ')
       ..write(_relativeTime(hit.createdAt));
-    return ListTile(
-      leading: const Icon(Icons.chat_bubble_outline),
-      title: Text(
-        _snippet(hit.content),
-        maxLines: 2,
-        overflow: TextOverflow.ellipsis,
-      ),
-      subtitle: Text(
-        meta.toString(),
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: theme.textTheme.bodySmall?.copyWith(
-          color: theme.colorScheme.onSurfaceVariant,
+    return _hitCard(
+      context,
+      ListTile(
+        leading: const Icon(Icons.chat_bubble_outline),
+        title: Text(
+          _snippet(hit.content),
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
         ),
-      ),
-      onTap: () => Navigator.of(context).push<void>(
-        MaterialPageRoute<void>(
-          builder: (_) =>
-              ChatScreen(sessionId: hit.sessionId, initialTitle: sessionTitle),
+        subtitle: Text(
+          meta.toString(),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: theme.textTheme.bodySmall?.copyWith(color: skin.c.onV),
+        ),
+        onTap: () => Navigator.of(context).push<void>(
+          MaterialPageRoute<void>(
+            builder: (_) =>
+                ChatScreen(sessionId: hit.sessionId, initialTitle: sessionTitle),
+          ),
         ),
       ),
     );
@@ -1480,42 +1578,50 @@ class _EmptyState extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
+    final skin = KeepsakeSkinColors.of(context);
     return Center(
       child: SingleChildScrollView(
         padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // mark 圆 64 + 图标 24（README §4.2）。
-            Container(
-              width: 64,
-              height: 64,
-              decoration: BoxDecoration(
-                color: scheme.surfaceContainerHighest,
-                shape: BoxShape.circle,
+        // 空态容器：rCard + hairlineBorder（只有 E 会画 1px 描边）。
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 28),
+          decoration: BoxDecoration(
+            borderRadius: skin.rCard,
+            border: skin.hairlineBorder,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // mark 64 + 图标尺寸跟皮肤（H = 26）。
+              Container(
+                width: 64,
+                height: 64,
+                decoration: BoxDecoration(
+                  color: skin.c.highest,
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  Icons.forum_outlined,
+                  size: skin.iconSize,
+                  color: skin.c.iconC,
+                ),
               ),
-              child: Icon(
-                Icons.forum_outlined,
-                size: KeepsakeTheme.iconSize,
-                color: scheme.onSurfaceVariant,
+              const SizedBox(height: 16),
+              // 标题 20/600（README §4.2）。
+              Text('还没有会话', style: theme.textTheme.titleLarge),
+              // 说明 14（README §4.2），与标题间距 4。
+              const SizedBox(height: 4),
+              Text(
+                '点右下角「新对话」开始，或从设置里导入 DeepSeek 的导出包',
+                textAlign: TextAlign.center,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  fontSize: 14,
+                  color: skin.c.onV,
+                ),
               ),
-            ),
-            const SizedBox(height: 16),
-            // 标题 20/600（README §4.2）。
-            Text('还没有会话', style: theme.textTheme.titleLarge),
-            // 说明 14（README §4.2），与标题间距 4。
-            const SizedBox(height: 4),
-            Text(
-              '点右下角「新对话」开始，或从设置里导入 DeepSeek 的导出包',
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                fontSize: 14,
-                color: scheme.onSurfaceVariant,
-              ),
-            ),
-            // 只保留右下角 FAB 一个「新对话」入口（空态按钮曾与 FAB 重复）。
-          ],
+              // 只保留右下角 FAB 一个「新对话」入口（空态按钮曾与 FAB 重复）。
+            ],
+          ),
         ),
       ),
     );
@@ -1531,22 +1637,26 @@ class _ErrorState extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final skin = KeepsakeSkinColors.of(context);
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(32),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.error_outline, size: 56, color: theme.colorScheme.error),
+            // 错误态图标尺寸跟皮肤。
+            Icon(
+              Icons.error_outline,
+              size: skin.iconSize,
+              color: theme.colorScheme.error,
+            ),
             const SizedBox(height: 12),
             Text('加载失败', style: theme.textTheme.titleMedium),
             const SizedBox(height: 8),
             Text(
               message,
               textAlign: TextAlign.center,
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
-              ),
+              style: theme.textTheme.bodySmall?.copyWith(color: skin.c.onV),
             ),
             const SizedBox(height: 16),
             OutlinedButton(onPressed: onRetry, child: const Text('重试')),

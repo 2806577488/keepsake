@@ -25,7 +25,6 @@ import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:highlight/languages/all.dart' show allLanguages;
 import 'package:keepsake/core/theme.dart'
     show
-        KeepsakeSchemeX,
         KeepsakeSkinColors,
         KeepsakeTheme,
         keepsakeMarkdownExtensionSet,
@@ -354,21 +353,27 @@ class MarkdownView extends StatelessWidget {
 
 /// 与主题（`KeepsakeTheme`，Material 3）配套的 markdown 样式。
 ///
-/// 基础样式直接取 `core/theme.dart` 的 [keepsakeMarkdownStyleSheet]（同一套配色），
-/// 只覆盖聊天场景的差异：
-/// - 气泡本身 padding 归零（设计稿 `MessageBubbleShell`）：横向 10 的内边距由
+/// 基础样式直接取 `core/theme.dart` 的 [keepsakeMarkdownStyleSheet]（同一套配色与
+/// 皮肤 token：正文 fsBody/行高、行内代码、代码块、表格、引用都已按皮肤生成），
+/// 本函数只覆盖聊天气泡的排版差异，**不重写一套字号/颜色**：
+/// - 气泡本身 padding 归零（设计稿 `MessageBubbleShell`）：横向内边距由
 ///   每个块自己带，代码块才能「通栏出血」到气泡内缘；
-/// - 代码块外观由 [_CodeBlock] 自己画（淡青头 + 白纸 + 分隔线），这里清掉外层装饰；
-/// - 正文行高统一 1.6。
+/// - 代码块外观由 [_CodeBlock] 自己画（头部 + 代码区 + 分隔线），这里清掉外层装饰；
+/// - 正文行高跟 `s.lineHeight`（A 1.6 / E 1.6 / H 1.55），不再写死。
 MarkdownStyleSheet _keepsakeStyleSheet(BuildContext context) {
   final theme = Theme.of(context);
+  // 为什么：字号 / 行高 / 圆角只能来自皮肤 token，页面写死会让三套皮肤长得一样。
+  final s = KeepsakeSkinColors.of(context);
   final base = keepsakeMarkdownStyleSheet(theme);
   return base.copyWith(
     // 每个块的横向 14 = 气泡内边距 12/14（README §4.3）；纵向只带顶部
     // （底部留白由气泡自己补一次，否则相邻两块的 12 会叠成 24）。
     // 代码块自己不吃这个 padding，直接贴到气泡内缘（通栏出血）。
     pPadding: const EdgeInsets.fromLTRB(14, 12, 14, 0),
-    p: (base.p ?? const TextStyle()).copyWith(height: 1.6),
+    p: (base.p ?? const TextStyle()).copyWith(
+      fontSize: s.fsBody,
+      height: s.lineHeight,
+    ),
     codeblockPadding: EdgeInsets.zero,
     codeblockDecoration: const BoxDecoration(),
     codeblockAlign: WrapAlignment.start,
@@ -392,12 +397,13 @@ Widget _buildImage(
   MarkdownImageConfig config,
   String? basePath,
 ) {
-  final theme = Theme.of(context);
+  // 为什么：图片圆角也必须跟皮肤（A 14 / E 6 / H 12），写死 8 换皮肤不会变。
+  final s = KeepsakeSkinColors.of(context);
   final alt = (config.alt ?? '').trim();
   final placeholder = _ImagePlaceholder(
     label: alt.isEmpty ? '图片' : alt,
     icon: Icons.broken_image_outlined,
-    color: theme.colorScheme.onSurfaceVariant,
+    color: s.c.onV,
   );
   final width = config.width;
   final height = config.height;
@@ -408,7 +414,7 @@ Widget _buildImage(
       final data = _decodeDataUri(uri.toString());
       if (data == null) return placeholder;
       return ClipRRect(
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: s.rCard,
         child: Image.memory(
           data,
           fit: BoxFit.contain,
@@ -419,7 +425,7 @@ Widget _buildImage(
     }
     if (scheme == 'http' || scheme == 'https') {
       return ClipRRect(
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: s.rCard,
         child: Image.network(
           uri.toString(),
           fit: BoxFit.contain,
@@ -431,8 +437,11 @@ Widget _buildImage(
                 if (event == null) return child;
                 return _ImagePlaceholder(
                   label: alt.isEmpty ? '图片' : alt,
-                  icon: Icons.image_outlined,
-                  color: theme.colorScheme.onSurfaceVariant,
+                  icon: s.icon(
+                    filled: Icons.image_outlined,
+                    outlined: Icons.image_outlined,
+                  ),
+                  color: s.c.onV,
                 );
               },
         ),
@@ -447,7 +456,7 @@ Widget _buildImage(
       path = '$basePath/$path';
     }
     return ClipRRect(
-      borderRadius: BorderRadius.circular(8),
+      borderRadius: s.rCard,
       child: Image.file(
         File(path),
         fit: BoxFit.contain,
@@ -487,10 +496,12 @@ class _ImagePlaceholder extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // 为什么：占位框是「卡片」形态，圆角跟 s.rCard，写死 8 换皮肤不变。
+    final s = KeepsakeSkinColors.of(context);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: s.rCard,
         border: Border.all(color: color.withValues(alpha: 0.35)),
       ),
       child: Row(
@@ -552,9 +563,11 @@ class _MathBuilder extends MarkdownElementBuilder {
     if (expression.isEmpty) return null;
     final isBlock = element.attributes['data-display'] == 'block';
     final theme = Theme.of(context);
+    // 为什么：公式基线与正文同阶（fsBody / 主要字色），颜色与字号都不写死。
+    final s = KeepsakeSkinColors.of(context);
     final baseStyle =
         (preferredStyle ?? theme.textTheme.bodyMedium ?? const TextStyle())
-            .copyWith(color: theme.colorScheme.onSurface, fontSize: 16);
+            .copyWith(color: s.c.onS, fontSize: s.fsBody);
     final formula = tex.Math.tex(
       expression,
       mathStyle: isBlock ? tex.MathStyle.display : tex.MathStyle.text,
@@ -564,8 +577,8 @@ class _MathBuilder extends MarkdownElementBuilder {
         return Text(
           isBlock ? '\$\$$expression\$\$' : '\$$expression\$',
           style: baseStyle.copyWith(
-            fontFamily: 'monospace',
-            color: theme.colorScheme.error,
+            fontFamily: KeepsakeTheme.monoFontFamily,
+            color: s.c.errC,
           ),
         );
       },
@@ -619,15 +632,16 @@ class _CodeBuilder extends MarkdownElementBuilder {
   }
 }
 
-/// 代码块（设计稿 B7：通栏出血 + 白纸 + 淡青头）。
+/// 代码块（拍板稿：通栏出血的「卡片」+ 头部 + 分隔线 + 代码区）。
 ///
-/// 结构：头部 34（语言 + 复制）+ 1px 分隔线 + 代码区。
-/// - **无外框、无圆角、无底色**：左右贴到气泡内缘（气泡 padding 归零，
-///   横向 10 的内边距由正文块自己带），只保留上下 12 的外边距；
-/// - 头部 [KeepsakeSchemeX.codeHeader]（品牌色 7% 铺在 surface 上），
-///   分隔线 [KeepsakeSchemeX.codeDivider]；
-/// - 代码区白纸（[ColorScheme.surface]）+ 内边距 12；
-/// - 代码横向滚动、**不换行**、字号 12.5 / 行高 1.6 / monospace；
+/// 结构：头部 34（语言 + 复制）+ 1px 分隔线 + 代码区，整体是一张卡片：
+/// - 左右贴到气泡内缘（气泡 padding 归零，横向内边距由正文块自己带），
+///   只保留上下 12 的外边距；
+/// - 底 [KeepsakeSkinColors.codeBackground]、头部 [KeepsakeSkinColors.codeHeader]、
+///   分隔线 [KeepsakeSkinColors.codeDivider]、文字 [KeepsakeSkinColors.codeForeground]；
+/// - 圆角 `skin.rCard`（A 14 / E 6 / H 12），描边 `skin.hairlineBorder`
+///   （只有 E 非空 = 1px #D8D4CC）；
+/// - 代码横向滚动、**不换行**、字号 `fsSub` / 行高 1.7 / monospace；
 /// - 语法高亮浅色 atom-one-light（为白底设计）、深色 atom-one-dark；
 /// - 复制键视觉 16，热区 44×34，颜色 [ColorScheme.primary]，2s 后复位。
 ///
@@ -680,7 +694,7 @@ class _CodeBlockState extends State<_CodeBlock> {
     final isDark = theme.brightness == Brightness.dark;
     final label = (widget.rawLanguage ?? '').trim();
     // 高亮主题：浅色 atom-one-light（这套本来就是为白底设计的）、
-    // 深色 atom-one-dark。背景统一交给代码区的白纸 Container 画，这里把 root
+    // 深色 atom-one-dark。背景统一交给外层卡片的 codeBackground 画，这里把 root
     // 背景设成透明，否则 HighlightView 会退回它自带的白底。
     final highlightTheme = Map<String, TextStyle>.of(
       isDark ? atomOneDarkTheme : atomOneLightTheme,
@@ -689,10 +703,10 @@ class _CodeBlockState extends State<_CodeBlock> {
       color: skin.codeForeground,
       backgroundColor: Colors.transparent,
     );
-    // 代码字阶：13 / 行高 1.7（README §4.3）。
+    // 代码字阶：fsSub / 行高 1.7（代码行高固定 1.7，不用正文 1.55~1.6）。
     final codeStyle = TextStyle(
       fontFamily: KeepsakeTheme.monoFontFamily,
-      fontSize: 13,
+      fontSize: skin.fsSub,
       height: 1.7,
       color: skin.codeForeground,
     );
@@ -700,77 +714,96 @@ class _CodeBlockState extends State<_CodeBlock> {
     return Padding(
       // 通栏出血：左右 0（贴气泡内缘），只留上下 12 与正文隔开。
       padding: const EdgeInsets.symmetric(vertical: 12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        mainAxisSize: MainAxisSize.min,
-        children: <Widget>[
-          // 头部 34 高淡青（README §4.3）：左边语言名 12 号，右边复制键。
-          Container(
-            height: 34,
-            padding: const EdgeInsets.only(left: 14, right: 8),
-            color: skin.codeHeader,
-            child: Row(
-              children: <Widget>[
-                Expanded(
-                  child: Text(
-                    label.isEmpty ? '代码' : label,
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w500,
-                      color: scheme.onSurfaceVariant,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                IconButton(
-                  onPressed: _copy,
-                  tooltip: _copied ? '已复制' : '复制',
-                  // §6：复制代码 `Icons.copy_outlined` 18，勾 16。
-                  iconSize: _copied ? 16 : 18,
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints.tightFor(
-                    width: 44,
-                    height: 34,
-                  ),
-                  color: scheme.primary,
-                  icon: Icon(
-                    _copied ? Icons.check : Icons.copy_outlined,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          // 1px 分隔线（README §1 codeDivider）。
-          Container(height: 1, color: skin.codeDivider),
-          // 代码区：白底 + 内边距 10/14，横向滚动、不换行、不裁剪。
-          Container(
-            color: skin.codeBackground,
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-            child: Scrollbar(
-              controller: _hScroll,
-              child: SingleChildScrollView(
-                controller: _hScroll,
-                scrollDirection: Axis.horizontal,
-                child: widget.language == null
-                    ? Text(
-                        widget.code,
-                        style: codeStyle,
-                        softWrap: false,
-                      )
-                    : RepaintBoundary(
-                        child: HighlightView(
-                          widget.code,
-                          language: widget.language,
-                          theme: highlightTheme,
-                          padding: EdgeInsets.zero,
-                          textStyle: codeStyle,
-                        ),
+      child: Container(
+        // 为什么整块包一层卡片：三套皮肤靠圆角 + 只有 E 的 1px 描边区分代码块形态，
+        // 头部/代码区的底色仍各自铺，圆角靠 clip 裁掉，不需要额外 ClipRRect。
+        decoration: BoxDecoration(
+          color: skin.codeBackground,
+          borderRadius: skin.rCard,
+          border: skin.hairlineBorder,
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            // 头部 34 高淡青：左边语言名，右边复制键。
+            Container(
+              height: 34,
+              padding: const EdgeInsets.only(left: 14, right: 8),
+              color: skin.codeHeader,
+              child: Row(
+                children: <Widget>[
+                  Expanded(
+                    child: Text(
+                      label.isEmpty ? '代码' : label,
+                      style: TextStyle(
+                        // 为什么：语言名是元信息 —— E 走等宽，A/H 跟主字体。
+                        fontFamily: skin.metaFontFamily,
+                        fontSize: skin.fsSub,
+                        fontWeight: FontWeight.w500,
+                        color: skin.c.onV,
                       ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: _copy,
+                    tooltip: _copied ? '已复制' : '复制',
+                    // §6：复制代码按 icons.md「复制」行走 content_copy(_outlined) 18，勾 16。
+                    iconSize: _copied ? 16 : 18,
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints.tightFor(
+                      width: 44,
+                      height: 34,
+                    ),
+                    color: scheme.primary,
+                    icon: Icon(
+                      _copied
+                          ? Icons.check
+                          : skin.icon(
+                              filled: Icons.content_copy,
+                              outlined: Icons.content_copy_outlined,
+                            ),
+                    ),
+                  ),
+                ],
               ),
             ),
-          ),
-        ],
+            // 1px 分隔线（拍板稿 codeDiv）。
+            Container(height: 1, color: skin.codeDivider),
+            // 代码区：底色由外层卡片铺，这里只留内边距 10/14，横向滚动、不换行。
+            Container(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 14,
+                vertical: 10,
+              ),
+              child: Scrollbar(
+                controller: _hScroll,
+                child: SingleChildScrollView(
+                  controller: _hScroll,
+                  scrollDirection: Axis.horizontal,
+                  child: widget.language == null
+                      ? Text(
+                          widget.code,
+                          style: codeStyle,
+                          softWrap: false,
+                        )
+                      : RepaintBoundary(
+                          child: HighlightView(
+                            widget.code,
+                            language: widget.language,
+                            theme: highlightTheme,
+                            padding: EdgeInsets.zero,
+                            textStyle: codeStyle,
+                          ),
+                        ),
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

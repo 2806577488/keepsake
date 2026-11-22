@@ -32,6 +32,8 @@ import '../../core/chat/attachments.dart' show AttachmentRules;
 import '../../core/chat/gallery_picker.dart';
 import '../../core/chat/image_util.dart' show imageSizeOf;
 import '../../core/providers.dart';
+// 为什么：chip 的图标 15 / 字号 12 只在 token 层有常量，页面里写死会和三套皮肤脱节。
+import '../../core/skin_tokens.dart' show kChipFontSize, kChipIconSize;
 import '../../core/theme.dart'
     show KeepsakeSkinColors, KeepsakeTheme;
 import '../../core/usage/usage.dart' show occupancyPercent;
@@ -337,11 +339,13 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     final theme = Theme.of(context);
     await showModalBottomSheet<void>(
       context: context,
-      showDragHandle: true,
+      // 为什么：抓手由 [_SheetGrabber] 按 token（36×4）自己画，主题自带的那套会被叠成两根。
+      showDragHandle: false,
       builder: (sheetContext) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
+            const _SheetGrabber(),
             ListTile(
               leading: Icon(
                 Icons.photo_library_outlined,
@@ -377,11 +381,13 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   Future<void> _showImageMenu() async {
     final ImageSource? source = await showModalBottomSheet<ImageSource>(
       context: context,
-      showDragHandle: true,
+      // 为什么：同附件菜单——抓手统一走 [_SheetGrabber] 的 token 尺寸。
+      showDragHandle: false,
       builder: (sheetContext) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
+            const _SheetGrabber(),
             ListTile(
               leading: const Icon(Icons.photo_camera_outlined),
               title: const Text('拍照'),
@@ -465,20 +471,25 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   Future<void> _showCameraBlockedDialog() async {
     final bool? goSettings = await showDialog<bool>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('没有相机权限'),
-        content: const Text('系统已经不再弹授权框了。去设置里允许「相机」，或者直接从相册选择图片。'),
-        actions: <Widget>[
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('改为相册'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('去设置'),
-          ),
-        ],
-      ),
+      builder: (dialogContext) {
+        // 为什么：对话框四角圆角按皮肤（旧写法只有上两角圆，和拍板稿不一致）。
+        final skin = KeepsakeSkinColors.of(dialogContext);
+        return AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: skin.rSheet),
+          title: const Text('没有相机权限'),
+          content: const Text('系统已经不再弹授权框了。去设置里允许「相机」，或者直接从相册选择图片。'),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('改为相册'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('去设置'),
+            ),
+          ],
+        );
+      },
     );
     if (goSettings == null || !mounted) return;
     if (goSettings) {
@@ -717,7 +728,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       builder: (BuildContext dialogContext) {
         return StatefulBuilder(
           builder: (BuildContext context, StateSetter setDialogState) {
+            // 为什么：对话框四角圆角走皮肤 token（dialog 用 rSheet，不是 sheet 的顶圆角）。
+            final skin = KeepsakeSkinColors.of(context);
             return AlertDialog(
+              shape: RoundedRectangleBorder(borderRadius: skin.rSheet),
               title: const Text('上下文预算（当前会话）'),
               content: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -787,16 +801,16 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   /// 选中整行铺 primaryContainer，文字位置不变。
   Future<void> _editThinkingLevel() async {
     final currentLevel = _state.thinkingLevel;
+    // 为什么：弹层顶圆角只能来自皮肤 token（旧 KeepsakeTheme.sheetTopRadius 已删）。
+    final skin = KeepsakeSkinColors.of(context);
     final picked = await showModalBottomSheet<ThinkingLevel>(
       context: context,
       // 遮罩 rgba(0,0,0,.5)（README §4.5）。
       barrierColor: Colors.black.withValues(alpha: 0.5),
-      backgroundColor: Theme.of(context).colorScheme.surfaceContainerLow,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(
-          top: Radius.circular(KeepsakeTheme.sheetTopRadius),
-        ),
-      ),
+      backgroundColor: skin.c.low,
+      // 为什么：抓手由弹层自己画（36×4 token），关掉主题自带的 32×4。
+      showDragHandle: false,
+      shape: RoundedRectangleBorder(borderRadius: skin.rSheetTop),
       builder: (BuildContext sheetContext) =>
           _ThinkingLevelSheet(current: currentLevel),
     );
@@ -810,7 +824,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
-      showDragHandle: true,
+      // 为什么：抓手由 _ModelSheet 自己画（36×4 token），这里的默认抓手会重复一根。
+      showDragHandle: false,
       builder: (BuildContext sheetContext) {
         return _ModelSheet(sessionId: widget.sessionId);
       },
@@ -835,69 +850,105 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   Future<void> _showMessageMenu(ChatMessage message) async {
     final isUser = message.isUser;
     final isAssistant = message.isAssistant;
+    // 为什么：弹层底色 / 内距 / 危险色一律走 token（A 清透 / E 纸感 / H 墨色 同一套代码）。
+    final skin = KeepsakeSkinColors.of(context);
     await showModalBottomSheet<void>(
       context: context,
-      showDragHandle: true,
+      // 为什么：抓手自己画（36×4 token + 上下 8 留白），关掉主题自带的 32×4。
+      showDragHandle: false,
+      shape: RoundedRectangleBorder(borderRadius: skin.rSheetTop),
       builder: (BuildContext sheetContext) {
         return SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: <Widget>[
-              ListTile(
-                leading: const Icon(Icons.copy_rounded),
-                title: const Text('复制'),
-                onTap: () {
-                  Navigator.of(sheetContext).pop();
-                  unawaited(_copyMessage(message));
-                },
-              ),
-              if (isUser)
+          child: Padding(
+            // 弹层内距 20（sheetPadding）。
+            padding: const EdgeInsets.only(
+              bottom: KeepsakeTheme.sheetPadding,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                const _SheetGrabber(),
                 ListTile(
-                  leading: const Icon(Icons.edit_outlined),
-                  title: const Text('编辑'),
-                  subtitle: const Text('以这条回复的问题重新生成一版，旧回答会留在分支里'),
+                  leading: Icon(
+                    skin.icon(
+                      filled: Icons.content_copy,
+                      outlined: Icons.content_copy_outlined,
+                    ),
+                  ),
+                  title: const Text('复制'),
                   onTap: () {
                     Navigator.of(sheetContext).pop();
-                    unawaited(_editMessage(message));
+                    unawaited(_copyMessage(message));
                   },
                 ),
-              if (isAssistant)
+                if (isUser)
+                  ListTile(
+                    leading: Icon(
+                      skin.icon(
+                        filled: Icons.edit_outlined,
+                        outlined: Icons.edit_outlined,
+                      ),
+                    ),
+                    title: const Text('编辑'),
+                    subtitle: const Text('以这条回复的问题重新生成一版，旧回答会留在分支里'),
+                    onTap: () {
+                      Navigator.of(sheetContext).pop();
+                      unawaited(_editMessage(message));
+                    },
+                  ),
+                if (isAssistant)
+                  ListTile(
+                    leading: Icon(
+                      skin.icon(
+                        filled: Icons.refresh,
+                        outlined: Icons.refresh,
+                      ),
+                    ),
+                    title: const Text('重新生成'),
+                    subtitle: const Text('以这条回复的问题重新生成一版，旧回答会留在分支里'),
+                    onTap: () {
+                      Navigator.of(sheetContext).pop();
+                      unawaited(_controller.regenerate(message.id));
+                    },
+                  ),
+                if (message.hasBranches)
+                  ListTile(
+                    leading: Icon(
+                      skin.icon(
+                        filled: Icons.call_split,
+                        outlined: Icons.call_split_outlined,
+                      ),
+                    ),
+                    title: const Text('切换分支'),
+                    subtitle: Text(
+                      '第 ${message.branchIndex} / ${message.branchCount} 个分支',
+                    ),
+                    onTap: () {
+                      Navigator.of(sheetContext).pop();
+                      unawaited(_showBranchPicker(message));
+                    },
+                  ),
+                // 危险操作：底 errBg + 字/图标 onErrBg（§5 危险操作按下不发黑、只换色）。
                 ListTile(
-                  leading: const Icon(Icons.refresh_rounded),
-                  title: const Text('重新生成'),
-                  subtitle: const Text('以这条回复的问题重新生成一版，旧回答会留在分支里'),
-                  onTap: () {
-                    Navigator.of(sheetContext).pop();
-                    unawaited(_controller.regenerate(message.id));
-                  },
-                ),
-              if (message.hasBranches)
-                ListTile(
-                  leading: const Icon(Icons.alt_route_rounded),
-                  title: const Text('切换分支'),
-                  subtitle: Text(
-                    '第 ${message.branchIndex} / ${message.branchCount} 个分支',
+                  tileColor: skin.c.errBg,
+                  leading: Icon(
+                    skin.icon(
+                      filled: Icons.delete_outline,
+                      outlined: Icons.delete_outline,
+                    ),
+                    color: skin.c.onErrBg,
+                  ),
+                  title: Text(
+                    '删除',
+                    style: TextStyle(color: skin.c.onErrBg),
                   ),
                   onTap: () {
                     Navigator.of(sheetContext).pop();
-                    unawaited(_showBranchPicker(message));
+                    unawaited(_confirmDeleteMessage(message));
                   },
                 ),
-              ListTile(
-                leading: Icon(
-                  Icons.delete_outline,
-                  color: Theme.of(context).colorScheme.error,
-                ),
-                title: Text(
-                  '删除',
-                  style: TextStyle(color: Theme.of(context).colorScheme.error),
-                ),
-                onTap: () {
-                  Navigator.of(sheetContext).pop();
-                  unawaited(_confirmDeleteMessage(message));
-                },
-              ),
-            ],
+              ],
+            ),
           ),
         );
       },
@@ -909,7 +960,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     final next = await showDialog<String>(
       context: context,
       builder: (BuildContext dialogContext) {
+        // 为什么：编辑对话框四角圆角走 skin.rSheet。
+        final skin = KeepsakeSkinColors.of(dialogContext);
         return AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: skin.rSheet),
           title: const Text('编辑'),
           content: TextField(
             controller: controller,
@@ -941,7 +995,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (BuildContext dialogContext) {
+        // 为什么：危险操作按钮用 errBg 底 + onErrBg 字，不用主色（避免「删除」看起来像确定）。
+        final skin = KeepsakeSkinColors.of(dialogContext);
         return AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: skin.rSheet),
           title: const Text('删除这条消息？'),
           content: const Text('这条消息及其之后的所有分支都会被删除，无法恢复。'),
           actions: <Widget>[
@@ -950,6 +1007,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
               child: const Text('取消'),
             ),
             FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: skin.c.errBg,
+                foregroundColor: skin.c.onErrBg,
+                minimumSize: const Size(0, KeepsakeTheme.sheetButtonHeight),
+              ),
               onPressed: () => Navigator.of(dialogContext).pop(true),
               child: const Text('删除'),
             ),
@@ -966,7 +1028,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     final picked = await showDialog<int>(
       context: context,
       builder: (BuildContext dialogContext) {
+        // 为什么：分支选择是对话框（dialog 用四角 s.rSheet），不是底部弹层。
+        final skin = KeepsakeSkinColors.of(dialogContext);
         return AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: skin.rSheet),
           title: const Text('切换分支'),
           content: Text(
             '当前第 ${message.branchIndex} / ${message.branchCount} 个分支。',
@@ -1083,13 +1148,15 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            // 双行顶栏：标题 16/600 + 模型行 12（量自设计图，比列表页 20 小一号）。
+            // 双行顶栏：标题 fsTitle + 皮肤字重（H 700）+ 模型行 fsSub。
             Text(
               title,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: theme.textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.w600,
+                // 为什么：字重跟皮肤走，H 的「重」不能靠页面写死 w600。
+                fontWeight:
+                    KeepsakeSkinColors.of(context).titleWeight,
                 color: Theme.of(context).colorScheme.onSurface,
               ),
             ),
@@ -1168,8 +1235,12 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                               if (autoFollow || state.messages.isEmpty) {
                                 return const SizedBox.shrink();
                               }
+                              final skin = KeepsakeSkinColors.of(context);
                               return _ArrowButton(
-                                icon: Icons.keyboard_arrow_down_rounded,
+                                icon: skin.icon(
+                                  filled: Icons.keyboard_arrow_down,
+                                  outlined: Icons.keyboard_arrow_down,
+                                ),
                                 tooltip: '滚动到底',
                                 onPressed: _jumpToBottom,
                               );
@@ -1304,9 +1375,11 @@ class _ModelPick extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    // 为什么：小胶囊圆角走皮肤 token（A 胶囊 / E 3 / H 8），不写死 6。
+    final skin = KeepsakeSkinColors.of(context);
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(6),
+      borderRadius: skin.rChip,
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 1),
         child: Row(
@@ -1372,6 +1445,8 @@ class _ModelSheetState extends ConsumerState<_ModelSheet> {
       if (current != null && current.model.trim().isNotEmpty) current.model,
       ...?modelsAsync?.asData?.value.map((ProviderModel model) => model.id),
     }.where((String id) => id.trim().isNotEmpty).toList(growable: false);
+    // 为什么：标题字重 / 单选图标色都要跟皮肤走（H 700、选中 selBar）。
+    final skin = KeepsakeSkinColors.of(context);
 
     return Padding(
       padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
@@ -1381,9 +1456,24 @@ class _ModelSheetState extends ConsumerState<_ModelSheet> {
         ),
         child: ListView(
           shrinkWrap: true,
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          // 弹层内距 20（sheetPadding），顶部留抓手的 8 由 [_SheetGrabber] 自己带。
+          padding: const EdgeInsets.fromLTRB(
+            KeepsakeTheme.sheetPadding,
+            0,
+            KeepsakeTheme.sheetPadding,
+            KeepsakeTheme.sheetPadding,
+          ),
           children: <Widget>[
-            Text('平台与模型（当前会话）', style: theme.textTheme.titleMedium),
+            // 为什么：抓手自己画（36×4 token），主题自带的 32×4 已关掉。
+            const _SheetGrabber(),
+            // 弹层标题 18 + 皮肤字重（H 700）。
+            Text(
+              '平台与模型（当前会话）',
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontSize: 18,
+                fontWeight: skin.titleWeight,
+              ),
+            ),
             const SizedBox(height: 8),
             if (book.providers.isEmpty)
               Padding(
@@ -1403,9 +1493,11 @@ class _ModelSheetState extends ConsumerState<_ModelSheet> {
                   provider.id == current?.id
                       ? Icons.radio_button_checked
                       : Icons.radio_button_unchecked,
+                  // 为什么：单选 20、选中 selBar、未选 outline，尺寸/色都走 token。
+                  size: 20,
                   color: provider.id == current?.id
-                      ? theme.colorScheme.primary
-                      : theme.colorScheme.onSurfaceVariant,
+                      ? skin.c.selBar
+                      : skin.c.outline,
                 ),
                 title: Text(provider.name),
                 subtitle: Text(
@@ -1445,13 +1537,19 @@ class _ModelSheetState extends ConsumerState<_ModelSheet> {
                             model == state.model
                                 ? Icons.radio_button_checked
                                 : Icons.radio_button_unchecked,
+                            // 为什么：单选 20、选中 selBar、未选 outline（同上一处）。
+                            size: 20,
                             color: model == state.model
-                                ? theme.colorScheme.primary
-                                : theme.colorScheme.onSurfaceVariant,
+                                ? skin.c.selBar
+                                : skin.c.outline,
                           ),
                           title: Text(
                             model,
-                            style: const TextStyle(fontFamily: 'monospace'),
+                            // 为什么：模型名是元信息，字体走 skin.metaFontFamily（E 等宽）。
+                            style: TextStyle(
+                              fontFamily: skin.metaFontFamily,
+                              fontSize: skin.fsSub,
+                            ),
                           ),
                           onTap: () async {
                             await _controller.setModel(model);
@@ -1486,7 +1584,11 @@ class _ModelSheetState extends ConsumerState<_ModelSheet> {
                 labelText: '默认模型',
                 hintText: state.model.isEmpty ? '先填一个模型名' : state.model,
               ),
-              style: const TextStyle(fontFamily: 'monospace'),
+              // 为什么：手填模型名也是元信息，字体跟皮肤（E 等宽），不再写死 monospace。
+              style: TextStyle(
+                fontFamily: skin.metaFontFamily,
+                fontSize: skin.fsBody,
+              ),
               onSubmitted: (String value) async {
                 if (value.trim().isEmpty) return;
                 await _controller.setModel(value.trim());
@@ -1543,21 +1645,14 @@ class _MessageBubble extends StatelessWidget {
     final scheme = theme.colorScheme;
     final skin = KeepsakeSkinColors.of(context);
     final isUser = message.isUser;
-    // 用户气泡用皮肤 primaryContainer；助手气泡 surfaceContainerLow（README §4.3）。
-    final bubbleColor = isUser ? skin.userBubbleBg : scheme.surfaceContainerLow;
-    final textColor = isUser ? skin.userBubbleFg : scheme.onSurface;
-    // 气泡圆角：大角 18 / 贴角 4（README §3、§4.3）。
-    // 用户右下 4，助手左下 4。
-    final radius = BorderRadius.only(
-      topLeft: Radius.circular(KeepsakeTheme.bubbleRadius),
-      topRight: Radius.circular(KeepsakeTheme.bubbleRadius),
-      bottomLeft: Radius.circular(
-        isUser ? KeepsakeTheme.bubbleRadius : KeepsakeTheme.bubbleTailRadius,
-      ),
-      bottomRight: Radius.circular(
-        isUser ? KeepsakeTheme.bubbleTailRadius : KeepsakeTheme.bubbleRadius,
-      ),
-    );
+    // 为什么：气泡底/文字只认皮肤 token（用户 pC/onPC、助手 aiBg/aiFg），三套皮肤同一份代码。
+    final bubbleColor = isUser ? skin.userBubbleBg : skin.aiBubbleBg;
+    final textColor = isUser ? skin.userBubbleFg : skin.aiBubbleFg;
+    // 为什么：拍板稿 §4.3 删掉「大角 18 + 贴角 4」的尾巴，四角统一 rBubble（A16/E8/H14）。
+    final radius = skin.rBubble;
+    // 内距：用户 水平 14 / 垂直 10，助手 水平 16 / 垂直 14（SPEC §4.3）。
+    final padH = isUser ? 14.0 : 16.0;
+    final padTop = isUser ? 10.0 : 14.0;
 
     final showStreamStatus =
         !isUser &&
@@ -1572,7 +1667,7 @@ class _MessageBubble extends StatelessWidget {
         (message.plainText.isNotEmpty || message.streaming || message.error);
     final hasBranches = message.hasBranches;
 
-    // 气泡内 padding 归零（设计稿 MessageBubbleShell）：横向 10 的内边距交给
+    // 气泡内 padding 归零（设计稿 MessageBubbleShell）：横向内边距交给
     // 每个子项自己带，代码块才能「通栏出血」贴到气泡内缘（Container 不吃负 margin）。
     final bubble = GestureDetector(
       onLongPress: onLongPress,
@@ -1580,9 +1675,10 @@ class _MessageBubble extends StatelessWidget {
         decoration: BoxDecoration(
           color: bubbleColor,
           borderRadius: radius,
+          // 为什么：错误气泡用红描边；普通气泡只有 E 有 1px 发丝描边（其余皮肤 hairlineBorder 为 null）。
           border: message.error
               ? Border.all(color: scheme.error.withValues(alpha: 0.6))
-              : null,
+              : skin.hairlineBorder,
         ),
         clipBehavior: Clip.antiAlias,
         child: Column(
@@ -1591,8 +1687,8 @@ class _MessageBubble extends StatelessWidget {
           children: <Widget>[
             if (!isUser && message.thinking.trim().isNotEmpty)
               Padding(
-                // 气泡内边距 12/14（README §4.3）。
-                padding: const EdgeInsets.fromLTRB(14, 12, 14, 0),
+                // 思考面板内距跟正文一致（助手 16/14）。
+                padding: EdgeInsets.fromLTRB(padH, padTop, padH, 0),
                 child: _ThinkingPanel(
                   thinking: message.thinking,
                   seconds: message.thinkingSeconds,
@@ -1601,24 +1697,24 @@ class _MessageBubble extends StatelessWidget {
               ),
             if (showStreamStatus)
               Padding(
-                padding: const EdgeInsets.fromLTRB(14, 12, 14, 0),
+                padding: EdgeInsets.fromLTRB(padH, padTop, padH, 0),
                 child: _StreamStatus(searching: message.searchingNow),
               ),
             if (showBody)
               DefaultTextStyle.merge(
                 style: TextStyle(color: textColor),
                 child: isUser
-                    // 用户气泡 padding 12/14、字 15/1.6（README §4.3）。
+                    // 用户气泡内距 14/10、正文 fsBody + 皮肤行高（SPEC §4.3）。
                     ? Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 14,
-                          vertical: 12,
+                        padding: EdgeInsets.symmetric(
+                          horizontal: padH,
+                          vertical: padTop,
                         ),
                         child: SelectableText(
                           message.plainText,
                           style: theme.textTheme.bodyLarge?.copyWith(
-                            fontSize: 15,
-                            height: 1.6,
+                            fontSize: skin.fsBody,
+                            height: skin.lineHeight,
                             color: textColor,
                           ),
                         ),
@@ -1628,9 +1724,9 @@ class _MessageBubble extends StatelessWidget {
             if (message.attachments.isNotEmpty)
               Padding(
                 padding: EdgeInsets.fromLTRB(
-                  14,
-                  showBody || showStreamStatus ? 8 : 12,
-                  14,
+                  padH,
+                  showBody || showStreamStatus ? 8 : padTop,
+                  padH,
                   0,
                 ),
                 child: _MessageAttachments(
@@ -1640,7 +1736,7 @@ class _MessageBubble extends StatelessWidget {
               ),
             if (message.searchSources.isNotEmpty)
               Padding(
-                padding: const EdgeInsets.fromLTRB(14, 8, 14, 0),
+                padding: EdgeInsets.fromLTRB(padH, 8, padH, 0),
                 child: _SearchSourcesView(
                   sources: message.searchSources,
                   onOpen: (String url) => onOpenLink(url, url, ''),
@@ -1648,7 +1744,7 @@ class _MessageBubble extends StatelessWidget {
               ),
             if (message.error)
               Padding(
-                padding: const EdgeInsets.fromLTRB(14, 6, 14, 0),
+                padding: EdgeInsets.fromLTRB(padH, 6, padH, 0),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: <Widget>[
@@ -1665,7 +1761,7 @@ class _MessageBubble extends StatelessWidget {
               ),
             if (message.streaming && message.text.trim().isNotEmpty)
               Padding(
-                padding: const EdgeInsets.fromLTRB(14, 6, 14, 0),
+                padding: EdgeInsets.fromLTRB(padH, 6, padH, 0),
                 child: SizedBox(
                   width: 12,
                   height: 12,
@@ -1675,87 +1771,99 @@ class _MessageBubble extends StatelessWidget {
                   ),
                 ),
               ),
-            // 底部统一留白（正文块的段落只带顶部间距，避免上下叠成双倍）。
-            const SizedBox(height: 12),
+            // 底部统一留白（正文块的段落只带顶部间距，避免上下叠成双倍）；
+            // 数值与垂直内距一致，气泡上下才对称。
+            SizedBox(height: padTop),
           ],
         ),
       ),
     );
 
-    // 助手气泡外侧保留 ✦ 头像（设计稿 B2：头像在气泡外，气泡内不带名字）。
-    final bubbleColumn = Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: isUser
-            ? CrossAxisAlignment.end
-            : CrossAxisAlignment.start,
-        children: <Widget>[
-          ConstrainedBox(
-            constraints: BoxConstraints(
-              // 气泡最大宽 76%（README §4.3）：窄屏/折叠屏都按屏宽比例封顶。
-              maxWidth: MediaQuery.sizeOf(context).width * 0.76,
-              minWidth: showStreamStatus ? 144 : 0,
-            ),
-            child: bubble,
-          ),
-          if (hasFooter)
-            Padding(
-              // 操作行左缘与气泡对齐；单键 44×44、间距 0（设计稿组件 §3）。
-              padding: const EdgeInsets.only(top: 4),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: <Widget>[
-                  if (message.plainText.isNotEmpty)
-                    SpeakButton(
-                      text: message.plainText,
-                      onToast: onToast,
-                      iconSize: 18,
-                    ),
-                  IconButton(
-                    onPressed: onCopy,
-                    iconSize: 18,
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints.tightFor(
-                      width: 44,
-                      height: 44,
-                    ),
-                    tooltip: '复制',
-                    icon: Icon(
-                      Icons.copy_rounded,
-                      color: scheme.onSurfaceVariant,
-                    ),
-                  ),
-                  if (onRegenerate != null)
-                    _RegenerateButton(
-                      onPressed: message.streaming ? null : onRegenerate,
-                    ),
-                  if (hasBranches)
-                    _BranchSwitcher(
-                      branchIndex: message.branchIndex,
-                      branchCount: message.branchCount,
-                      onPrev: onPrevBranch,
-                      onNext: onNextBranch,
-                    ),
-                ],
-              ),
-            ),
-        ],
+    // 气泡宽 76% 封顶（README §4.3）：窄屏/折叠屏都按屏宽比例封顶。
+    final bubbleBlock = ConstrainedBox(
+      constraints: BoxConstraints(
+        maxWidth: MediaQuery.sizeOf(context).width * 0.76,
+        minWidth: showStreamStatus ? 144 : 0,
+      ),
+      child: bubble,
     );
 
+    // 动作条：朗读 / 复制 / 重答 / 分支，图标 15、文字 12、图标↔文字 5、
+    // 项间距 16、整行左缩进 30（SPEC §4.4）。
+    List<Widget> actionItems() => <Widget>[
+      if (message.plainText.isNotEmpty) _SpeakAction(
+        text: message.plainText,
+        onToast: onToast,
+      ),
+      _ActionItem(
+        icon: skin.icon(
+          filled: Icons.content_copy,
+          outlined: Icons.content_copy_outlined,
+        ),
+        label: '复制',
+        onTap: onCopy,
+      ),
+      if (onRegenerate != null)
+        _RegenerateButton(
+          onPressed: message.streaming ? null : onRegenerate,
+        ),
+      if (hasBranches)
+        _ActionItem(
+          icon: skin.icon(
+            filled: Icons.call_split,
+            outlined: Icons.call_split_outlined,
+          ),
+          // 为什么：分支只给一个带文字的入口（方向箭头在顶栏的 _BranchSwitcher 上），
+          // 满足「动作条必须带文字」；点一下切到下一个分支，到末支再回头。
+          label: '分支 ${message.branchIndex}/${message.branchCount}',
+          onTap: message.canNextBranch
+              ? onNextBranch
+              : (message.canPrevBranch ? onPrevBranch : null),
+        ),
+    ];
+    final items = hasFooter ? actionItems() : const <Widget>[];
+    final footer = items.isEmpty
+        ? null
+        : Padding(
+            padding: const EdgeInsets.only(
+              top: 4,
+              left: KeepsakeTheme.actionIndent,
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                for (int i = 0; i < items.length; i++) ...<Widget>[
+                  if (i > 0) const SizedBox(width: KeepsakeTheme.actionSpacing),
+                  items[i],
+                ],
+              ],
+            ),
+          );
+
+    // 助手气泡外侧保留 ✦ 头像（设计稿 B2：头像在气泡外，气泡内不带名字）。
     return Padding(
       padding: EdgeInsets.only(top: 6, bottom: showTail ? 6 : 2),
-      child: Row(
-        mainAxisSize: MainAxisSize.max,
-        mainAxisAlignment:
-            isUser ? MainAxisAlignment.end : MainAxisAlignment.start,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          if (!isUser)
-            Padding(
-              // 头像 28 圆 14，与气泡 gap 8（README §4.3）。
-              padding: const EdgeInsets.only(right: 8),
-              child: _AssistantAvatar(),
-            ),
-          Flexible(child: bubbleColumn),
+          Row(
+            mainAxisSize: MainAxisSize.max,
+            mainAxisAlignment:
+                isUser ? MainAxisAlignment.end : MainAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              if (!isUser)
+                Padding(
+                  // 头像 28 圆 14，与气泡 gap 8（README §4.3）。
+                  padding: const EdgeInsets.only(right: 8),
+                  child: _AssistantAvatar(),
+                ),
+              Flexible(child: bubbleBlock),
+            ],
+          ),
+          // 为什么不写 if：动作条为空时就是 null，Dart 的 null-aware 元素更直白。
+          ?footer,
         ],
       ),
     );
@@ -1774,9 +1882,15 @@ class _AssistantAvatar extends StatelessWidget {
       height: 28,
       decoration: BoxDecoration(
         color: skin.aiAvatarBg,
-        shape: BoxShape.circle,
+        // 为什么：头像圆角走 token（A/H 正圆、E 方角），不再写死 shape: circle。
+        borderRadius: skin.rAvatar,
       ),
-      child: Icon(Icons.auto_awesome, size: 15, color: skin.aiAvatarFg),
+      child: Icon(
+        Icons.auto_awesome,
+        // 为什么：H 头像图标也要跟着变大（iconSize 26），这里按头像高度取 0.55。
+        size: skin.iconSize * 0.55,
+        color: skin.aiAvatarFg,
+      ),
     );
   }
 }
@@ -1810,10 +1924,12 @@ class _AssistantBodyState extends State<_AssistantBody> {
       return const SizedBox.shrink();
     }
     final theme = Theme.of(context);
+    // 为什么：字号 / 行高 / 圆角只能来自皮肤 token（H 正文 16，A 15）。
+    final skin = KeepsakeSkinColors.of(context);
     if (!_expanded && text.length > _AssistantBody.plainTextThreshold) {
-      // 气泡内 padding 归零后，这里自己补回 12/14 的内边距（README §4.3）。
+      // 气泡内 padding 归零后，这里自己补回助手正文内距 16/14（SPEC §4.3）。
       return Padding(
-        padding: const EdgeInsets.fromLTRB(14, 12, 14, 0),
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
@@ -1821,14 +1937,15 @@ class _AssistantBodyState extends State<_AssistantBody> {
             SelectableText(
               text,
               style: theme.textTheme.bodyLarge?.copyWith(
-                fontSize: 15,
-                height: 1.6,
+                fontSize: skin.fsBody,
+                height: skin.lineHeight,
               ),
             ),
             const SizedBox(height: 6),
             InkWell(
               onTap: () => setState(() => _expanded = true),
-              borderRadius: BorderRadius.circular(6),
+              // 为什么：小控件圆角走 rCard，不再写死 6。
+              borderRadius: skin.rCard,
               child: Padding(
                 padding: const EdgeInsets.symmetric(vertical: 4),
                 child: Row(
@@ -1836,7 +1953,7 @@ class _AssistantBodyState extends State<_AssistantBody> {
                   children: <Widget>[
                     Icon(
                       Icons.expand_more_rounded,
-                      size: 15,
+                      size: KeepsakeTheme.actionIconSize,
                       color: theme.colorScheme.primary,
                     ),
                     const SizedBox(width: 3),
@@ -1917,85 +2034,90 @@ class _ThinkingPanelState extends State<_ThinkingPanel> {
         : '思考过程';
     // 思考条：高 40、底 usageBar、字 12（README §4.3）。
     final expanded = _expanded;
-    final radius = BorderRadius.vertical(
-      top: const Radius.circular(8),
-      bottom: Radius.circular(expanded ? 0 : 8),
-    );
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      mainAxisSize: MainAxisSize.min,
-      children: <Widget>[
-        Material(
-          color: skin.usageBar,
-          borderRadius: radius,
-          child: InkWell(
-            onTap: () => setState(() => _expanded = !_expanded),
-            borderRadius: radius,
-            child: SizedBox(
-              height: 40,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 10),
-                child: Row(
-                  children: <Widget>[
-                    // 打开/收起指示三角（Material 图标，不用 Unicode 字符）。
-                    Icon(
-                      expanded
-                          ? Icons.expand_less_rounded
-                          : Icons.expand_more_rounded,
-                      size: 16,
-                      color: scheme.onSurfaceVariant,
-                    ),
-                    const SizedBox(width: 4),
-                    Expanded(
-                      child: Text(
-                        label,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
+    // 为什么：底 usageBar + 圆角 rCard + E 的 1px 发丝描边（SPEC §4.5）；
+    // 整块一个 Container 画外观，展开内容跟着同一组圆角裁，不会戳出直角。
+    return Container(
+      decoration: BoxDecoration(
+        color: skin.usageBar,
+        borderRadius: skin.rCard,
+        border: skin.hairlineBorder,
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Material(
+        type: MaterialType.transparency,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            InkWell(
+              onTap: () => setState(() => _expanded = !_expanded),
+              child: SizedBox(
+                height: 40,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  child: Row(
+                    children: <Widget>[
+                      // 打开/收起指示三角（Material 图标，不用 Unicode 字符）。
+                      Icon(
+                        expanded
+                            ? Icons.expand_less_rounded
+                            : Icons.expand_more_rounded,
+                        // 为什么：16 太小，按拍板稿 §4.4 的小图标档取 20。
+                        size: 20,
+                        color: scheme.onSurfaceVariant,
+                      ),
+                      const SizedBox(width: 4),
+                      Expanded(
+                        child: Text(
+                          label,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: scheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ),
+                      if (widget.streaming)
+                        const Padding(
+                          padding: EdgeInsets.only(right: 6),
+                          child: SizedBox(
+                            width: 10,
+                            height: 10,
+                            child:
+                                CircularProgressIndicator(strokeWidth: 1.4),
+                          ),
+                        ),
+                      Text(
+                        expanded ? '收起' : '展开',
                         style: theme.textTheme.labelSmall?.copyWith(
-                          color: scheme.onSurfaceVariant,
+                          color: scheme.primary,
                         ),
                       ),
-                    ),
-                    if (widget.streaming)
-                      const Padding(
-                        padding: EdgeInsets.only(right: 6),
-                        child: SizedBox(
-                          width: 10,
-                          height: 10,
-                          child: CircularProgressIndicator(strokeWidth: 1.4),
-                        ),
-                      ),
-                    Text(
-                      expanded ? '收起' : '展开',
-                      style: theme.textTheme.labelSmall?.copyWith(
-                        color: scheme.primary,
-                      ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             ),
-          ),
+            if (expanded)
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  // 左侧强调条用选中色（selBar），跟随皮肤。
+                  border: Border(
+                    left: BorderSide(color: skin.c.selBar, width: 2),
+                  ),
+                ),
+                child: SelectableText(
+                  widget.thinking.trim(),
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                    height: 1.5,
+                  ),
+                ),
+              ),
+          ],
         ),
-        if (expanded)
-          Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: skin.usageBar,
-              borderRadius: const BorderRadius.vertical(
-                bottom: Radius.circular(8),
-              ),
-              border: Border(left: BorderSide(color: scheme.primary, width: 2)),
-            ),
-            child: SelectableText(
-              widget.thinking.trim(),
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: scheme.onSurfaceVariant,
-                height: 1.5,
-              ),
-            ),
-          ),
-      ],
+      ),
     );
   }
 }
@@ -2040,24 +2162,27 @@ class _SearchSourcesView extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    // 为什么：来源卡片圆角走 rCard、E 有发丝描边（SPEC §4.6），不再写死 14 和死底色。
+    final skin = KeepsakeSkinColors.of(context);
     // 官方样式：正文底下只留一个「N 个网页」小胶囊，点开再看完整列表。
     return Align(
       alignment: Alignment.centerLeft,
       child: InkWell(
         onTap: () => _showSourcesSheet(context),
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: skin.rCard,
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
           decoration: BoxDecoration(
-            color: scheme.surfaceContainerHigh,
-            borderRadius: BorderRadius.circular(14),
+            color: skin.c.high,
+            borderRadius: skin.rCard,
+            border: skin.hairlineBorder,
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
               Icon(
-                Icons.travel_explore_rounded,
-                size: 14,
+                skin.icon(filled: Icons.language, outlined: Icons.language),
+                size: kChipIconSize,
                 color: scheme.primary,
               ),
               const SizedBox(width: 5),
@@ -2076,13 +2201,17 @@ class _SearchSourcesView extends StatelessWidget {
 
   /// 点开胶囊：从底部弹出完整来源列表。
   void _showSourcesSheet(BuildContext context) {
+    final skin = KeepsakeSkinColors.of(context);
     showModalBottomSheet<void>(
       context: context,
-      showDragHandle: true,
+      // 为什么：抓手统一由 [_SheetGrabber] 画（36×4），关掉主题自带的 32×4。
+      showDragHandle: false,
       isScrollControlled: true,
+      shape: RoundedRectangleBorder(borderRadius: skin.rSheetTop),
       builder: (sheetContext) {
         final theme = Theme.of(sheetContext);
         final scheme = theme.colorScheme;
+        final sheetSkin = KeepsakeSkinColors.of(sheetContext);
         return SafeArea(
           child: ConstrainedBox(
             constraints: BoxConstraints(
@@ -2091,19 +2220,33 @@ class _SearchSourcesView extends StatelessWidget {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: <Widget>[
+                const _SheetGrabber(),
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                  // 弹层内距 20（sheetPadding）。
+                  padding: const EdgeInsets.fromLTRB(
+                    KeepsakeTheme.sheetPadding,
+                    0,
+                    KeepsakeTheme.sheetPadding,
+                    8,
+                  ),
                   child: Row(
                     children: <Widget>[
                       Icon(
-                        Icons.travel_explore_rounded,
-                        size: 16,
+                        sheetSkin.icon(
+                          filled: Icons.language,
+                          outlined: Icons.language,
+                        ),
+                        size: 20,
                         color: scheme.primary,
                       ),
                       const SizedBox(width: 6),
                       Text(
                         '搜索结果（${sources.length}）',
-                        style: theme.textTheme.titleSmall,
+                        // 弹层标题 18 + 皮肤字重。
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontSize: 18,
+                          fontWeight: sheetSkin.titleWeight,
+                        ),
                       ),
                     ],
                   ),
@@ -2136,7 +2279,10 @@ class _SearchSourcesView extends StatelessWidget {
                                 ),
                               ),
                         trailing: Icon(
-                          Icons.open_in_new_rounded,
+                          sheetSkin.icon(
+                            filled: Icons.open_in_new,
+                            outlined: Icons.open_in_new,
+                          ),
                           size: 14,
                           color: scheme.onSurfaceVariant,
                         ),
@@ -2229,15 +2375,16 @@ class _AttachmentViewState extends State<_AttachmentView> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
+    final scheme = Theme.of(context).colorScheme;
+    // 为什么：附件缩略图/卡片的圆角走 rCard（A14/E6/H12），不写死 8。
+    final skin = KeepsakeSkinColors.of(context);
     final attachment = widget.attachment;
     final isImage = attachment.isImage;
 
     Widget content;
     if (isImage && !_failed && attachment.path.isNotEmpty) {
       content = ClipRRect(
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: skin.rCard,
         child: Image.file(
           File(attachment.path),
           width: widget.size,
@@ -2267,7 +2414,7 @@ class _AttachmentViewState extends State<_AttachmentView> {
             child: Container(
               decoration: BoxDecoration(
                 color: scheme.scrim.withValues(alpha: 0.45),
-                borderRadius: BorderRadius.circular(8),
+                borderRadius: skin.rCard,
               ),
               child: const Center(
                 child: SizedBox(
@@ -2295,7 +2442,7 @@ class _AttachmentViewState extends State<_AttachmentView> {
                 radius: 9,
                 backgroundColor: scheme.surfaceContainerHighest,
                 child: Icon(
-                  Icons.close_rounded,
+                  skin.icon(filled: Icons.close, outlined: Icons.close),
                   size: 12,
                   color: scheme.onSurfaceVariant,
                 ),
@@ -2322,23 +2469,28 @@ Widget _fileCard(
   final scheme = theme.colorScheme;
   final icon = _iconForFileName(attachment.fileName);
   final size = _fmtSize(attachment.fileSize);
+  // 为什么：文件卡片也走 rCard + E 发丝描边（SPEC §4.6），不再写死 8 和纯底色。
+  final skin = KeepsakeSkinColors.of(context);
   if (compact) {
     return Container(
       width: 56,
       height: 56,
       decoration: BoxDecoration(
-        color: scheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(8),
+        color: skin.c.highest,
+        borderRadius: skin.rCard,
+        border: skin.hairlineBorder,
       ),
-      child: Icon(icon, size: 24, color: scheme.onSurfaceVariant),
+      // 为什么：图标跟着皮肤尺寸走（H 26）。
+      child: Icon(icon, size: skin.iconSize, color: scheme.onSurfaceVariant),
     );
   }
   return Container(
     constraints: const BoxConstraints(maxWidth: 260),
     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
     decoration: BoxDecoration(
-      color: scheme.surfaceContainerHighest,
-      borderRadius: BorderRadius.circular(8),
+      color: skin.c.highest,
+      borderRadius: skin.rCard,
+      border: skin.hairlineBorder,
     ),
     child: Row(
       mainAxisSize: MainAxisSize.min,
@@ -2441,37 +2593,46 @@ class _EmptyChat extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    // 为什么：空态的字号/字重/圆角也要跟皮肤（H 标题 22/700，E 衬线）。
+    final skin = KeepsakeSkinColors.of(context);
     return Center(
       child: SingleChildScrollView(
         padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
-            // mark 圆 64×64、底 surfaceContainerHighest、图标 24（README §4.2）。
+            // mark 64×64、底 highest、图标跟皮肤尺寸（README §4.2）。
             Container(
               width: 64,
               height: 64,
               decoration: BoxDecoration(
-                color: scheme.surfaceContainerHighest,
-                shape: BoxShape.circle,
+                color: skin.c.highest,
+                // 为什么：圆形也走 token（rPill = 999，三套都是圆），不写 BoxShape.circle。
+                borderRadius: skin.rPill,
               ),
               child: Icon(
-                Icons.mic_none_rounded,
-                size: KeepsakeTheme.iconSize,
+                skin.icon(filled: Icons.mic, outlined: Icons.mic_none),
+                size: skin.iconSize,
                 color: scheme.onSurfaceVariant,
               ),
             ),
             // 与 mark 间距 16。
             const SizedBox(height: 16),
-            // 标题 20/600（README §4.2）。
-            Text('问点什么', style: theme.textTheme.titleLarge),
-            // 说明 14/onSurfaceVariant，与标题间距 4（README §4.2）。
+            // 标题 fsBar + 皮肤字重（README §4.2）。
+            Text(
+              '问点什么',
+              style: theme.textTheme.titleLarge?.copyWith(
+                fontSize: skin.fsBar,
+                fontWeight: skin.titleWeight,
+              ),
+            ),
+            // 说明 fsSub/onV，与标题间距 4（README §4.2）。
             const SizedBox(height: 4),
             Text(
               '打字，或按住麦克风说话',
               textAlign: TextAlign.center,
               style: theme.textTheme.bodyMedium?.copyWith(
-                fontSize: 14,
+                fontSize: skin.fsSub,
                 color: scheme.onSurfaceVariant,
               ),
             ),
@@ -2522,16 +2683,18 @@ class _SuggestionRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    // 为什么：建议行圆角/描边/字号走皮肤 token（A 14 / E 6 / H 12）。
+    final skin = KeepsakeSkinColors.of(context);
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(KeepsakeTheme.cardRadius),
+      borderRadius: skin.rCard,
       child: Container(
         height: 52,
         padding: const EdgeInsets.symmetric(horizontal: 14),
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(KeepsakeTheme.cardRadius),
-          // 1px 描边 outlineVariant（README §4.2）。
-          border: Border.all(color: scheme.outlineVariant),
+          borderRadius: skin.rCard,
+          // 1px 描边：E 用发丝描边；A/H 靠底色分层但这里要保留可点区域的边界。
+          border: skin.hairlineBorder ?? Border.all(color: skin.c.ov),
         ),
         child: Row(
           children: <Widget>[
@@ -2541,7 +2704,7 @@ class _SuggestionRow extends StatelessWidget {
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 style: theme.textTheme.bodyMedium?.copyWith(
-                  fontSize: 14,
+                  fontSize: skin.fsBody,
                   color: scheme.onSurface,
                 ),
               ),
@@ -2549,7 +2712,8 @@ class _SuggestionRow extends StatelessWidget {
             const SizedBox(width: 8),
             Icon(
               Icons.chevron_right_rounded,
-              size: 16,
+              // 为什么：16 偏小，按小图标档取 20。
+              size: 20,
               color: scheme.onSurfaceVariant,
             ),
           ],
@@ -2587,7 +2751,9 @@ class _ComposerTools extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // 芯片行（README §4.4）：高 32、圆 16、字 13、间距 6；
+    // 图标风格跟皮肤：联网 language、深度思考 lightbulb(_outline)、上下文轮数 schedule(_outlined)。
+    final skin = KeepsakeSkinColors.of(context);
+    // 芯片行（SPEC §4.4）：高 32、左右内距 12、圆角 rChip、图标 15、文字 12、间距 6；
     // 文案固定带中点分隔符 —— `联网 · 开`、`思考 · 中`、`20 轮`，
     // 不写「思考 中」（会被读成「正在思考中」）。
     return SingleChildScrollView(
@@ -2599,6 +2765,8 @@ class _ComposerTools extends StatelessWidget {
             label: supportsSearch
                 ? (searchEnabled ? '联网 · 开' : '联网 · 关')
                 : '联网 · 不支持',
+            // 为什么：chip 必须有图标（SPEC §4.4 图标 15），用 Material 官方图形。
+            icon: skin.icon(filled: Icons.language, outlined: Icons.language),
             selected: supportsSearch && searchEnabled,
             disabled: !supportsSearch,
             onTap: onToggleSearch,
@@ -2610,6 +2778,10 @@ class _ComposerTools extends StatelessWidget {
                       ? '思考 · ${thinkingLevel.label}'
                       : '思考 · 关')
                 : '思考 · 不支持',
+            icon: skin.icon(
+              filled: Icons.lightbulb,
+              outlined: Icons.lightbulb_outline,
+            ),
             selected: supportsThinking && thinkingEnabled,
             disabled: !supportsThinking,
             onTap: onToggleThinking,
@@ -2618,6 +2790,10 @@ class _ComposerTools extends StatelessWidget {
           ),
           _ToolChip(
             label: contextKeepRounds <= 0 ? '不限制' : '$contextKeepRounds 轮',
+            icon: skin.icon(
+              filled: Icons.schedule,
+              outlined: Icons.schedule_outlined,
+            ),
             onTap: onEditContextBudget,
             tooltip: '超出窗口的部分压成 ≤600 字摘要',
           ),
@@ -2629,11 +2805,12 @@ class _ComposerTools extends StatelessWidget {
 
 /// 单个工具 chip（[_ToolChip]）。
 ///
-/// 视觉 32 高 / 圆 16（README §4.4），点击区撑到 48（§3 触摸区下限）；
-/// 选中只改颜色与描边（描边用透明占位保持 1px 宽度），文字不会位移。
+/// 视觉：高 32 / 左右内距 12 / 圆角 rChip / 图标 15 / 文字 12（SPEC §4.4）；
+/// 点击区撑到 48（§3 触摸区下限）；开态只换底色与字色，文字不会位移。
 class _ToolChip extends StatelessWidget {
   const _ToolChip({
     required this.label,
+    required this.icon,
     required this.onTap,
     this.onLongPress,
     this.selected = false,
@@ -2642,6 +2819,9 @@ class _ToolChip extends StatelessWidget {
   });
 
   final String label;
+
+  /// 芯片图标（Material 官方图形；尺寸固定 kChipIconSize）。
+  final IconData icon;
   final VoidCallback onTap;
   final VoidCallback? onLongPress;
   final bool selected;
@@ -2651,50 +2831,54 @@ class _ToolChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
+    // 为什么：开态底 pC + 字 onPC；关态透明底 + 1px ov 描边 + 字 onV（SPEC §4.4）。
+    final skin = KeepsakeSkinColors.of(context);
     final foreground = disabled
-        ? scheme.onSurfaceVariant.withValues(alpha: 0.5)
+        ? skin.c.onV.withValues(alpha: 0.5)
         : selected
-        ? scheme.onPrimaryContainer
-        : scheme.onSurfaceVariant;
-    final background = selected
-        ? scheme.primaryContainer
-        : scheme.surfaceContainerLow;
+        ? skin.c.onPC
+        : skin.c.onV;
+    final background = selected ? skin.c.pC : Colors.transparent;
     final chip = Padding(
       // 芯片间距 6（README §4.4）。
       padding: const EdgeInsets.only(right: 6),
       child: InkWell(
         onTap: disabled ? null : onTap,
         onLongPress: disabled ? null : onLongPress,
-        borderRadius: BorderRadius.circular(KeepsakeTheme.chipRadius),
+        borderRadius: skin.rChip,
         child: SizedBox(
           // 触达高度 48（README §3），芯片本体 32（§4.4）。
           height: 48,
           child: Center(
             child: Container(
               height: KeepsakeTheme.chipHeight,
-              padding: const EdgeInsets.symmetric(horizontal: 14),
+              padding: const EdgeInsets.symmetric(
+                horizontal: KeepsakeTheme.chipPadH,
+              ),
               decoration: BoxDecoration(
                 color: background,
-                borderRadius: BorderRadius.circular(
-                  KeepsakeTheme.chipRadius,
-                ),
+                borderRadius: skin.rChip,
+                // 为什么：透明底必须靠 1px 描边定边界；开态用透明占位保持 1px 不位移。
                 border: Border.all(
                   width: 1,
-                  color: selected
-                      ? Colors.transparent
-                      : scheme.outlineVariant,
+                  color: selected ? Colors.transparent : skin.c.ov,
                 ),
               ),
-              child: Center(
-                child: Text(
-                  label,
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    fontSize: 13,
-                    color: foreground,
-                    fontWeight: selected ? FontWeight.w600 : null,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  Icon(icon, size: kChipIconSize, color: foreground),
+                  const SizedBox(width: 6),
+                  Text(
+                    label,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      fontSize: kChipFontSize,
+                      color: foreground,
+                      // 为什么：开态用皮肤标题字重（H 700 / A 600 / E 700）。
+                      fontWeight: selected ? skin.titleWeight : null,
+                    ),
                   ),
-                ),
+                ],
               ),
             ),
           ),
@@ -2817,6 +3001,8 @@ class _InputBarState extends State<_InputBar> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    // 为什么：输入框/语音条圆角、正文与 hint 色一律走皮肤 token。
+    final skin = KeepsakeSkinColors.of(context);
     final recording = widget.holdState.phase == VoicePhase.recording;
     final transcribing = widget.holdState.phase == VoicePhase.transcribing;
     return SafeArea(
@@ -2869,24 +3055,18 @@ class _InputBarState extends State<_InputBar> {
                       onPointerUp: widget.onPointerUp,
                       onPointerCancel: widget.onPointerCancel,
                       child: Container(
-                        // 语音条与输入框同高（48）同圆角（24）（README §4.4）。
+                        // 语音条与输入框同高（inputHeight）同圆角（rField）（SPEC §4.4）。
                         constraints: const BoxConstraints(
                           minHeight: KeepsakeTheme.inputHeight,
                         ),
                         padding: const EdgeInsets.symmetric(vertical: 12),
                         alignment: Alignment.center,
                         decoration: BoxDecoration(
-                          color: recording
-                              ? scheme.errorContainer
-                              : scheme.surfaceContainerHighest,
-                          borderRadius: BorderRadius.circular(
-                            KeepsakeTheme.inputRadius,
-                          ),
+                          color: recording ? skin.c.errBg : skin.c.highest,
+                          borderRadius: skin.rField,
                           border: Border.all(
                             width: 1,
-                            color: recording
-                                ? scheme.error
-                                : Colors.transparent,
+                            color: recording ? scheme.error : Colors.transparent,
                           ),
                         ),
                         child: Row(
@@ -2902,12 +3082,14 @@ class _InputBarState extends State<_InputBar> {
                               )
                             else
                               Icon(
-                                recording
-                                    ? Icons.mic_rounded
-                                    : Icons.mic_none_rounded,
-                                size: 18,
+                                skin.icon(
+                                  filled: Icons.mic,
+                                  outlined: Icons.mic_none,
+                                ),
+                                // 为什么：18 改成小图标档 20（拍板稿 §4.4）。
+                                size: 20,
                                 color: recording
-                                    ? scheme.onErrorContainer
+                                    ? skin.c.onErrBg
                                     : scheme.onSurfaceVariant,
                               ),
                             const SizedBox(width: 6),
@@ -2917,7 +3099,7 @@ class _InputBarState extends State<_InputBar> {
                                   : widget.holdState.hintText,
                               style: theme.textTheme.bodyMedium?.copyWith(
                                 color: recording
-                                    ? scheme.onErrorContainer
+                                    ? skin.c.onErrBg
                                     : scheme.onSurface,
                               ),
                             ),
@@ -2931,9 +3113,12 @@ class _InputBarState extends State<_InputBar> {
                       minLines: 1,
                       maxLines: widget.compact ? 3 : 6,
                       textInputAction: TextInputAction.newline,
-                      // 输入框：高 48 / 圆 24 / 底 surfaceContainerHighest / 字 15
-                      // （README §4.4；配色与圆角由主题 inputDecorationTheme 给）。
-                      style: theme.textTheme.bodyLarge,
+                      // 输入框：高 48 / 圆角 rField / 底 highest / hint onV
+                      // （SPEC §4.4；底/圆角/内距由主题 inputDecorationTheme 给）。
+                      // 为什么：正文字号跟皮肤（H 16），不再固定 bodyLarge 的 15。
+                      style: theme.textTheme.bodyLarge?.copyWith(
+                        fontSize: skin.fsBody,
+                      ),
                       decoration: const InputDecoration(
                         hintText: '发消息…',
                         contentPadding: EdgeInsets.symmetric(
@@ -2953,7 +3138,7 @@ class _InputBarState extends State<_InputBar> {
               icon: Icon(
                 widget.voiceMode
                     ? Icons.keyboard_alt_outlined
-                    : Icons.mic_none_rounded,
+                    : skin.icon(filled: Icons.mic, outlined: Icons.mic_none),
                 color: widget.voiceMode
                     ? scheme.primary
                     : scheme.onSurfaceVariant,
@@ -2992,15 +3177,15 @@ class _SendStopButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
     final skin = KeepsakeSkinColors.of(context);
-    // 发送键 44×44、圆 22（README §4.4）；底/前景来自皮肤（§0 sendButton / onSend）。
+    // 发送键 44×44、圆角 rSend（A 胶囊 / E 8 / H 14）；底/前景来自皮肤（SPEC §4.4）。
     final bool enabled = canSend && !sending && !streaming;
     final Color background;
     final Color foreground;
     if (streaming) {
-      background = scheme.errorContainer;
-      foreground = scheme.onErrorContainer;
+      // 为什么：停止态是「打断」语义，用危险色 errBg/onErrBg，不用主色块。
+      background = skin.c.errBg;
+      foreground = skin.c.onErrBg;
     } else if (enabled) {
       background = skin.sendBg;
       foreground = skin.sendFg;
@@ -3021,18 +3206,20 @@ class _SendStopButton extends StatelessWidget {
           height: KeepsakeTheme.sendSize,
           child: Material(
             color: background,
-            // 圆 22 = 44/2（README §4.4），用 token 而不是直接写死。
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(KeepsakeTheme.sendRadius),
-            ),
+            shape: RoundedRectangleBorder(borderRadius: skin.rSend),
             child: InkWell(
               onTap: action,
-              customBorder: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(KeepsakeTheme.sendRadius),
-              ),
+              customBorder: RoundedRectangleBorder(borderRadius: skin.rSend),
               child: Center(
                 child: streaming
-                    ? Icon(Icons.stop_rounded, size: 20, color: foreground)
+                    ? Icon(
+                        skin.icon(
+                          filled: Icons.stop,
+                          outlined: Icons.stop_circle_outlined,
+                        ),
+                        size: 20,
+                        color: foreground,
+                      )
                     : sending
                     ? SizedBox(
                         width: 16,
@@ -3064,31 +3251,34 @@ class _ThinkingLevelSheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
+    // 为什么：弹层内距/标题字重/单选色都走皮肤 token。
+    final skin = KeepsakeSkinColors.of(context);
     return SafeArea(
       top: false,
       child: Padding(
-        // 弹层底部 padding 20（README §4.5）。
-        padding: const EdgeInsets.only(bottom: 20),
+        // 弹层底部内距 20（sheetPadding）。
+        padding: const EdgeInsets.only(bottom: KeepsakeTheme.sheetPadding),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
-            // 抓手：自己画 32×4、圆 2（§4.5、§6）。
-            Center(
-              child: Container(
-                margin: const EdgeInsets.only(top: 8, bottom: 4),
-                width: 32,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: scheme.outlineVariant,
-                  borderRadius: BorderRadius.circular(2),
+            // 抓手：36×4 胶囊、居中、上下留白 8（SPEC §4.5）。
+            const _SheetGrabber(),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                KeepsakeTheme.sheetPadding,
+                0,
+                KeepsakeTheme.sheetPadding,
+                12,
+              ),
+              child: Text(
+                '思考强度',
+                // 弹层标题 18 + 皮肤字重（H 700）。
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontSize: 18,
+                  fontWeight: skin.titleWeight,
                 ),
               ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 6, 20, 12),
-              child: Text('思考强度', style: theme.textTheme.titleLarge),
             ),
             for (final level in ThinkingLevel.values)
               _ThinkingLevelRow(
@@ -3105,8 +3295,7 @@ class _ThinkingLevelSheet extends StatelessWidget {
 
 /// 弹层里的一个档位行（README §4.5）：高 64、padding 10/20、gap 14。
 ///
-/// 选中整行铺 primaryContainer，**只改颜色**：单选位、名称宽度、间距都不变，
-/// 所以文字不会跳。
+/// 选中整行铺 pC，**只改颜色**：单选位、名称宽度、间距都不变，所以文字不会跳。
 class _ThinkingLevelRow extends StatelessWidget {
   const _ThinkingLevelRow({
     required this.level,
@@ -3122,9 +3311,10 @@ class _ThinkingLevelRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    final nameColor = selected ? scheme.onPrimaryContainer : scheme.onSurface;
+    final skin = KeepsakeSkinColors.of(context);
+    final nameColor = selected ? skin.c.onPC : scheme.onSurface;
     return Material(
-      color: selected ? scheme.primaryContainer : Colors.transparent,
+      color: selected ? skin.c.pC : Colors.transparent,
       child: InkWell(
         onTap: onTap,
         child: SizedBox(
@@ -3133,39 +3323,35 @@ class _ThinkingLevelRow extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
             child: Row(
               children: <Widget>[
-                // 单选位 20×20 圆 10：未选 2px outline，选中实心 primary。
-                Container(
-                  width: 20,
-                  height: 20,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: selected ? scheme.primary : Colors.transparent,
-                    border: selected
-                        ? null
-                        : Border.all(color: scheme.outline, width: 2),
-                  ),
+                // 单选图标 20：选中 selBar，未选 outline（SPEC §4.5）。
+                Icon(
+                  selected
+                      ? Icons.radio_button_checked
+                      : Icons.radio_button_unchecked,
+                  size: 20,
+                  color: selected ? skin.c.selBar : skin.c.outline,
                 ),
                 const SizedBox(width: 14),
-                // 名称 16/600，固定宽 32（§4.5）。
+                // 名称 fsBody + 皮肤字重，固定宽 32（§4.5）。
                 SizedBox(
                   width: 32,
                   child: Text(
                     level.label,
                     style: theme.textTheme.bodyLarge?.copyWith(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
+                      fontSize: skin.fsBody,
+                      fontWeight: skin.titleWeight,
                       color: nameColor,
                     ),
                   ),
                 ),
-                // 副标题 14/onSurfaceVariant，紧跟名称。
+                // 副标题 fsSub/onV，紧跟名称。
                 Expanded(
                   child: Text(
                     level.description,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: theme.textTheme.bodyMedium?.copyWith(
-                      fontSize: 14,
+                      fontSize: skin.fsSub,
                       color: scheme.onSurfaceVariant,
                     ),
                   ),
@@ -3225,7 +3411,10 @@ class _BranchSwitcher extends StatelessWidget {
   }
 }
 
-/// 重新生成按钮（[_RegenerateButton]）。
+/// 重新生成（[_RegenerateButton]）：动作条里的「重答」。
+///
+/// 为什么改：原先是 44×44 的大 IconButton，拍板稿 §4.4 要求动作条统一
+/// 图标 15 + 文字 12 的小尺寸、且**带文字**，所以这里直接复用 [_ActionItem]。
 class _RegenerateButton extends StatelessWidget {
   const _RegenerateButton({required this.onPressed});
 
@@ -3233,14 +3422,117 @@ class _RegenerateButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return IconButton(
-      onPressed: onPressed,
-      iconSize: 18,
-      padding: EdgeInsets.zero,
-      constraints: const BoxConstraints.tightFor(width: 44, height: 44),
+    final skin = KeepsakeSkinColors.of(context);
+    return _ActionItem(
+      icon: skin.icon(filled: Icons.refresh, outlined: Icons.refresh),
+      label: '重答',
+      onTap: onPressed,
       tooltip: '以这条回复的问题重新生成一版，旧回答会留在分支里',
-      icon: Icon(Icons.refresh_rounded, color: scheme.onSurfaceVariant),
+    );
+  }
+}
+
+/// 动作条文字样式（12、按皮肤主字体；E 是宋体，H 字重更重）。
+///
+/// 为什么抽出来：朗读 / 复制 / 重答 / 分支四项的文字必须完全同款，
+/// 任何一项写死字号都会在切换皮肤时跟其他项对不齐。
+TextStyle _actionLabelStyle(KeepsakeSkinColors skin, Color color) =>
+    TextStyle(
+      fontSize: KeepsakeTheme.actionFontSize,
+      color: color,
+      fontFamily: skin.fontFamily,
+      fontFamilyFallback: skin.fontFamilyFallback,
+      height: 1.2,
+    );
+
+/// 动作条的一项（朗读 / 复制 / 重答 / 分支）：图标 15 + 间隙 5 + 文字 12。
+class _ActionItem extends StatelessWidget {
+  const _ActionItem({
+    required this.icon,
+    required this.label,
+    this.onTap,
+    this.tooltip,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback? onTap;
+  final String? tooltip;
+
+  @override
+  Widget build(BuildContext context) {
+    final skin = KeepsakeSkinColors.of(context);
+    final enabled = onTap != null;
+    // 为什么：禁用只降透明度，不改尺寸（拍板稿 §5 规则 1：状态切换不位移）。
+    final color = enabled ? skin.c.onV : skin.c.onV.withValues(alpha: 0.4);
+    final item = InkResponse(
+      // 为什么：去掉 44×44 的大触达框，改为贴合内容的小触达（水波仍由 InkResponse 给）。
+      onTap: onTap,
+      radius: 18,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 2),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Icon(icon, size: KeepsakeTheme.actionIconSize, color: color),
+            const SizedBox(width: KeepsakeTheme.actionGap),
+            Text(label, style: _actionLabelStyle(skin, color)),
+          ],
+        ),
+      ),
+    );
+    final text = tooltip ?? label;
+    return Tooltip(message: text, child: item);
+  }
+}
+
+/// 朗读动作项：图标 15 + 文字「朗读」。
+///
+/// 为什么还留着 SpeakButton：TTS 的播放/停止状态机在 `voice_button.dart`，
+/// 本文件不复制一份控制器逻辑；这里只把它的图标缩到 15、并在右侧补「朗读」文字。
+class _SpeakAction extends StatelessWidget {
+  const _SpeakAction({required this.text, required this.onToast});
+
+  final String text;
+  final void Function(String message) onToast;
+
+  @override
+  Widget build(BuildContext context) {
+    final skin = KeepsakeSkinColors.of(context);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        // 为什么不留 actionGap：SpeakButton 内部自带 4px 内距，视觉间隙已经到位。
+        SpeakButton(
+          text: text,
+          onToast: onToast,
+          iconSize: KeepsakeTheme.actionIconSize,
+        ),
+        Text('朗读', style: _actionLabelStyle(skin, skin.c.onV)),
+      ],
+    );
+  }
+}
+
+/// 弹层抓手：36×4 胶囊、居中、上下各 8 留白（SPEC §4.5）。
+///
+/// 为什么统一成一个 widget：所有底部弹层顶部的抓手必须同尺寸同色，
+/// 各写一份就会出现 32×4 / 36×4 / 主题默认三种并存。
+class _SheetGrabber extends StatelessWidget {
+  const _SheetGrabber();
+
+  @override
+  Widget build(BuildContext context) {
+    final skin = KeepsakeSkinColors.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(top: 8, bottom: 8),
+      child: Center(
+        child: Container(
+          width: KeepsakeTheme.sheetGrabberW,
+          height: KeepsakeTheme.sheetGrabberH,
+          decoration: BoxDecoration(color: skin.c.ov, borderRadius: skin.rPill),
+        ),
+      ),
     );
   }
 }
@@ -3262,21 +3554,25 @@ class _ArrowButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    // 为什么：圆角走 rPill（A/E/H 都是胶囊），不再用写死的 CircleBorder。
+    final skin = KeepsakeSkinColors.of(context);
     final enabled = onPressed != null;
+    final shape = RoundedRectangleBorder(borderRadius: skin.rPill);
     final button = Material(
-      color: scheme.surfaceContainerHigh,
-      shape: const CircleBorder(),
+      color: skin.c.high,
+      shape: shape,
       // 零阴影：README §1「阴影全部为 0」。
       elevation: 0,
       child: InkWell(
         onTap: onPressed,
-        customBorder: const CircleBorder(),
+        customBorder: shape,
         child: SizedBox(
           width: dense ? 26 : 36,
           height: dense ? 26 : 36,
           child: Icon(
             icon,
-            size: dense ? 18 : 20,
+            // 为什么：18→20、20→皮肤图标尺寸（H 26），不再写死中小号。
+            size: dense ? 20 : skin.iconSize,
             color: enabled
                 ? scheme.onSurfaceVariant
                 : scheme.onSurfaceVariant.withValues(alpha: 0.35),
@@ -3351,17 +3647,19 @@ class _ErrorBanner extends StatelessWidget {
     final text = message?.trim() ?? '';
     if (text.isEmpty) return const SizedBox.shrink();
     final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
+    // 为什么：错误条底 errBg、字/图标 onErrBg 都来自 token（A/E/H 三套各自的红）。
+    final skin = KeepsakeSkinColors.of(context);
     return Material(
-      color: scheme.errorContainer,
+      color: skin.c.errBg,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(12, 6, 6, 6),
         child: Row(
           children: <Widget>[
             Icon(
               Icons.error_outline_rounded,
-              size: 16,
-              color: scheme.onErrorContainer,
+              // 为什么：16→20，跟小图标档一致，红色提示要看得清。
+              size: 20,
+              color: skin.c.onErrBg,
             ),
             const SizedBox(width: 8),
             Expanded(
@@ -3370,14 +3668,14 @@ class _ErrorBanner extends StatelessWidget {
                 maxLines: 3,
                 overflow: TextOverflow.ellipsis,
                 style: theme.textTheme.bodySmall?.copyWith(
-                  color: scheme.onErrorContainer,
+                  color: skin.c.onErrBg,
                 ),
               ),
             ),
             TextButton(
               onPressed: onRetry,
               style: TextButton.styleFrom(
-                foregroundColor: scheme.onErrorContainer,
+                foregroundColor: skin.c.onErrBg,
                 visualDensity: VisualDensity.compact,
                 textStyle: theme.textTheme.labelMedium,
               ),
@@ -3387,8 +3685,11 @@ class _ErrorBanner extends StatelessWidget {
               onPressed: onDismiss,
               tooltip: '关闭',
               visualDensity: VisualDensity.compact,
-              iconSize: 16,
-              icon: Icon(Icons.close_rounded, color: scheme.onErrorContainer),
+              iconSize: 20,
+              icon: Icon(
+                skin.icon(filled: Icons.close, outlined: Icons.close),
+                color: skin.c.onErrBg,
+              ),
             ),
           ],
         ),

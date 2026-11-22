@@ -4,7 +4,7 @@ publish_to: 'none'
 
 # 版本号：与应用内更新检查（lib/core/update/update_service.dart）比较的基准，
 # 必须与发布 tag（v0.4.14）一致；CI 用 flutter build 自动写入 versionName / versionCode。
-version: 0.4.19+4190
+version: 0.4.20+4200
 
 environment:
   sdk: ^3.14.0
@@ -84,6 +84,19 @@ flutter:
 
   assets:
     - assets/web/
+
+  # E 纸感皮肤的主字体：思源宋体子集（GB2312 汉字 + 拉丁 + 标点，OFL 授权）。
+  # 打包字体是 E 能否「看起来是另一套皮肤」的关键：系统字体在国产机型上
+  # 不一定有衬线体，回退还会把字符渲染成乱码。
+  fonts:
+    - family: KeepsakeSerif
+      fonts:
+        - asset: assets/fonts/KeepsakeSerif-subset.otf
+    # E 纸感皮肤用宋体：本次**不打包字体**，靠系统 Songti SC / Noto Serif CJK /
+    # SimSun 兜底（无宋体的机型会退回黑体）。后续打包思源宋体子集时，把字体文件
+    # 放进 assets/fonts/，在此加一行 `- assets/fonts/`，并在 fonts: 里声明
+    # family: Songti SC，然后把 core/skin_tokens.dart 的 kSerifFontFamily 改成该
+    # assets 字体族名即可（页面不用改）。
 
   # 说明：KaTeX 字体由 flutter_math_fork 包自带（跟随其 package asset），
   # MaterialIcons 由 uses-material-design 打开，无需在此声明。
