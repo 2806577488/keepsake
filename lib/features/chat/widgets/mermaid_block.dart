@@ -23,6 +23,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
+import 'package:keepsake/core/theme.dart';
+
 // ---------------------------------------------------------------------------
 // 桥接协议（公开，供测试与其它模块复用）
 // ---------------------------------------------------------------------------
@@ -450,6 +452,7 @@ class _MermaidBlockState extends State<MermaidBlock> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    final s = KeepsakeSkinColors.of(context);
 
     Widget content;
     if (_svg != null) {
@@ -465,7 +468,7 @@ class _MermaidBlockState extends State<MermaidBlock> {
         alignment: Alignment.center,
         decoration: BoxDecoration(
           color: scheme.surfaceContainerHighest.withValues(alpha: 0.35),
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: s.rCard,
           border: Border.all(color: scheme.outlineVariant),
         ),
         child: Row(
@@ -513,6 +516,7 @@ class _MermaidBlockState extends State<MermaidBlock> {
   Widget _buildDiagram(BuildContext context, String svg) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    final s = KeepsakeSkinColors.of(context);
     return LayoutBuilder(
       builder: (BuildContext context, BoxConstraints constraints) {
         final viewBox = _parseViewBox(svg);
@@ -524,7 +528,7 @@ class _MermaidBlockState extends State<MermaidBlock> {
             padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
               color: scheme.surfaceContainerLowest,
-              borderRadius: BorderRadius.circular(10),
+              borderRadius: s.rCard,
               border: Border.all(color: scheme.outlineVariant),
             ),
             child: Center(
@@ -560,13 +564,14 @@ class _MermaidBlockState extends State<MermaidBlock> {
   Widget _buildPrompt(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    final s = KeepsakeSkinColors.of(context);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),
       child: Container(
         clipBehavior: Clip.antiAlias,
         decoration: BoxDecoration(
           color: scheme.surfaceContainerLow,
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: s.rCard,
           border: Border.all(color: scheme.outlineVariant),
         ),
         child: Column(
@@ -662,11 +667,12 @@ class _MermaidBlockState extends State<MermaidBlock> {
   Widget _fallbackCode(BuildContext context, String message) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    final s = KeepsakeSkinColors.of(context);
     return Container(
       clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
         color: Color.alphaBlend(scheme.error.withValues(alpha: 0.05), scheme.surface),
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: s.rCard,
         border: Border.all(color: scheme.error.withValues(alpha: 0.4)),
       ),
       child: Column(

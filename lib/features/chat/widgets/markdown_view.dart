@@ -120,6 +120,10 @@ String? normalizeCodeLanguage(String? raw) {
 final md.ExtensionSet keepsakeMarkdownExtensionSetWithMath = md.ExtensionSet(
   keepsakeMarkdownExtensionSet.blockSyntaxes,
   <md.InlineSyntax>[
+    // 引用标记 `[N]` 必须排在 GFM 的 link / 引用式链接之前：
+    // `[10]` 在 CommonMark 里本来就是「引用链接」的写法，排在后面就会被吞成链接，
+    // 渲染出裸方括号（v3.3 §1.3 真机 bug）。
+    _CitationSyntax(),
     ...keepsakeMarkdownExtensionSet.inlineSyntaxes,
     ...keepsakeMarkdownInlineSyntaxes,
     _CjkBoldSyntax(),
@@ -270,6 +274,7 @@ class KeepsakeMarkdown extends StatelessWidget {
     this.softLineBreak = true,
     this.fitContent = false,
     this.onTapLink,
+    this.onCitationTap,
     this.imageBasePath,
   });
 
@@ -288,6 +293,13 @@ class KeepsakeMarkdown extends StatelessWidget {
   /// 点击链接回调；为空时交给 flutter_markdown 默认行为（不跳转）。
   final void Function(String text, String? href, String title)? onTapLink;
 
+  /// 点击引用标记 `[N]` 的回调，参数是方括号里的编号。
+  ///
+  /// - 为空时**不响应点击**，但 `[N]` 仍然渲染成上标小数字（不能是裸方括号）；
+  /// - 非空时编号可点，热区 24×24（v3.3 §1.3），点击后由调用方决定是滚到底部
+  ///   的「N 个网页」还是展开引用列表。
+  final ValueChanged<int>? onCitationTap;
+
   /// 本地图片的相对路径基准目录（例如附件缓存目录）；为空则只支持绝对路径/data URI/http(s)。
   final String? imageBasePath;
 
@@ -297,6 +309,7 @@ class KeepsakeMarkdown extends StatelessWidget {
     final builders = <String, MarkdownElementBuilder>{
       'pre': _CodeBuilder(),
       kInlineMathTag: _MathBuilder(),
+      kCitationTag: _CitationBuilder(onTap: onCitationTap),
     };
     return MarkdownBody(
       data: normalizeMarkdownBold(data),
@@ -306,6 +319,8 @@ class KeepsakeMarkdown extends StatelessWidget {
       styleSheet: styleSheet,
       extensionSet: keepsakeMarkdownExtensionSetWithMath,
       builders: builders,
+      bulletBuilder: (MarkdownBulletParameters p) =>
+          _buildMarkdownBullet(context, p),
       onTapLink: onTapLink,
       sizedImageBuilder: (MarkdownImageConfig config) =>
           _buildImage(context, config, imageBasePath),
@@ -324,6 +339,7 @@ class MarkdownView extends StatelessWidget {
     this.softLineBreak = true,
     this.fitContent = false,
     this.onTapLink,
+    this.onCitationTap,
     this.imageBasePath,
   });
 
@@ -332,6 +348,7 @@ class MarkdownView extends StatelessWidget {
   final bool softLineBreak;
   final bool fitContent;
   final void Function(String text, String? href, String title)? onTapLink;
+  final ValueChanged<int>? onCitationTap;
   final String? imageBasePath;
 
   @override
@@ -342,9 +359,296 @@ class MarkdownView extends StatelessWidget {
       softLineBreak: softLineBreak,
       fitContent: fitContent,
       onTapLink: onTapLink,
+      onCitationTap: onCitationTap,
       imageBasePath: imageBasePath,
     );
   }
+}
+
+// ---------------------------------------------------------------------------
+// 引用标记 `[N]`（v3.3 §1.3）
+// ---------------------------------------------------------------------------
+
+/// 引用标记的 markdown 元素 tag（[_CitationSyntax] 产出，[_CitationBuilder] 消费）。
+const String kCitationTag = 'cite';
+
+/// 引用标记的字号：10（v3.3 §1.3，正文 16 的 62%）。
+const double kCitationFontSize = 10;
+
+/// 引用标记的触摸区边长：24（v3.3 §1.3，视觉是小数字，可点区够大）。
+///
+/// 注意：CSS 用 `::after` 把热区溢出到 18px 外，Flutter 的 `RenderParagraph`
+/// 只把命中转给 placeholder 自己的矩形，溢出部分收不到点击 —— 所以这里只能
+/// 真的让布局占 24。嫌字间空隙大就改这个常量（16 视觉更紧，热区变小），
+/// 不要再在别处写 24。
+const double kCitationTouchSize = 24;
+
+/// 把 `[N]`（1–3 位数字）解析成 `<cite>` 元素，交给 [_CitationBuilder] 渲染成上标。
+///
+/// 为什么必须在这里截住：`[10]` 在 CommonMark 里是「引用式链接」的写法，
+/// 不截住就会被链接语法吃掉、渲染成裸方括号（真机 bug：看着像错字，还点不了）。
+///
+/// 三种必须让路的情况：
+/// - `[10](url)`：紧跟 `(` 时是链接文字，返回 false 让给链接语法；
+/// - `\[10\]`：前面是反斜杠是转义，用户想看字面方括号；
+/// - 行内代码 / 围栏代码：由 CodeSpanSyntax / 代码块先整体吃掉，`[N]` 不会进来。
+class _CitationSyntax extends md.InlineSyntax {
+  _CitationSyntax() : super(r'\[([0-9]{1,3})\]', startCharacter: 0x5B);
+
+  @override
+  bool onMatch(md.InlineParser parser, Match match) {
+    final int end = match.end;
+    if (end < parser.source.length && parser.source[end] == '(') return false;
+    final int start = match.start;
+    if (start > 0 && parser.source[start - 1] == r'\') return false;
+    final String digits = match.group(1) ?? '';
+    if (digits.isEmpty) return false;
+    parser.addNode(md.Element.text(kCitationTag, digits));
+    return true;
+  }
+}
+
+/// 把 `<cite>` 元素渲染成上标小数字（可点）。
+class _CitationBuilder extends MarkdownElementBuilder {
+  _CitationBuilder({this.onTap});
+
+  /// 点击回调；为空时只渲染上标，不响应点击。
+  final ValueChanged<int>? onTap;
+
+  @override
+  Widget? visitElementAfterWithContext(
+    BuildContext context,
+    md.Element element,
+    TextStyle? preferredStyle,
+    TextStyle? parentStyle,
+  ) {
+    final String raw = element.textContent.trim();
+    final int? index = int.tryParse(raw);
+    if (index == null) return null;
+    // 为什么包成 Text.rich：flutter_markdown 0.7 把 inline builder 的返回值当成
+    // `Wrap` 的**独立子项**，只有「文本型 widget」（Text / RichText / SelectableText）
+    // 才会跟前后文本合并进同一段落；直接返回 GestureDetector 会把数字单独排成一行。
+    // 包一层 Text.rich + WidgetSpan，既能被当文本合并，又能带手势。
+    final s = KeepsakeSkinColors.of(context);
+    final theme = Theme.of(context);
+    return Text.rich(
+      TextSpan(
+        children: <InlineSpan>[
+          WidgetSpan(
+            // 为什么 middle + 上移 2：WidgetSpan 没有「上标」对齐方式，
+            // middle 让 10px 的数字落在行高中央，再抬 2 贴近 CSS 的 vertical-align: super。
+            alignment: PlaceholderAlignment.middle,
+            child: Transform.translate(
+              offset: const Offset(0, -2),
+              // 为什么带尺寸：见 [kCitationTouchSize] 的注释（溢出热区接不到点击）。
+              child: SizedBox(
+                width: kCitationTouchSize,
+                height: kCitationTouchSize,
+                child: Center(
+                  child: _CitationBadge(
+                    index: index,
+                    digits: raw,
+                    color: s.selectionBar,
+                    fontFamily: s.metaFontFamily,
+                    radius: s.rCb,
+                    pressColor: theme.highlightColor,
+                    onTap: onTap,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 引用标记本体：上标小数字 + 按下反馈。
+///
+/// - 字号 10 / 颜色 `selectionStroke`（token 字段 `selBar`）/ **无下划线**；
+/// - 按下反馈走 `--pressed` 语义 = `theme.highlightColor`，不写死灰；
+/// - [onTap] 为空时完全不响应点击，但**仍然渲染成上标数字**（不能是裸方括号）。
+class _CitationBadge extends StatefulWidget {
+  const _CitationBadge({
+    required this.index,
+    required this.digits,
+    required this.color,
+    required this.fontFamily,
+    required this.radius,
+    required this.pressColor,
+    this.onTap,
+  });
+
+  /// 编号（回调参数）。
+  final int index;
+
+  /// 显示的数字（保留模型给的原样，`007` 就显示 `007`）。
+  final String digits;
+
+  /// 文字色（`selBar`）。
+  final Color color;
+
+  /// 字体族（E 走等宽，A/H 跟主字体，与 .cite 的 `--meta-font` 一致）。
+  final String? fontFamily;
+
+  /// 按下高亮块圆角（`rCb`）。
+  final BorderRadius radius;
+
+  /// 按下时的底色（`theme.highlightColor`）。
+  final Color pressColor;
+
+  /// 点击回调。
+  final ValueChanged<int>? onTap;
+
+  @override
+  State<_CitationBadge> createState() => _CitationBadgeState();
+}
+
+class _CitationBadgeState extends State<_CitationBadge> {
+  bool _pressed = false;
+
+  void _setPressed(bool value) {
+    if (_pressed == value || !mounted) return;
+    setState(() => _pressed = value);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // 为什么 height: 1：10px 字在 1.6 行高里会撑高该行的行盒，
+    // 引用标记不该改变正文行距。
+    final Widget badge = AnimatedContainer(
+      duration: const Duration(milliseconds: 120),
+      padding: const EdgeInsets.symmetric(horizontal: 1),
+      decoration: BoxDecoration(
+        color: _pressed ? widget.pressColor : Colors.transparent,
+        borderRadius: widget.radius,
+      ),
+      child: Text(
+        widget.digits,
+        style: TextStyle(
+          fontSize: kCitationFontSize,
+          height: 1,
+          fontWeight: FontWeight.w500,
+          color: widget.color,
+          fontFamily: widget.fontFamily,
+          // v3.3 §1.3：引用标记不做下划线（长段落里太乱）。
+          decoration: TextDecoration.none,
+        ),
+      ),
+    );
+    final ValueChanged<int>? onTap = widget.onTap;
+    // 不可点也必须上标，不能退回裸方括号。
+    if (onTap == null) return badge;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => onTap(widget.index),
+      onTapDown: (TapDownDetails _) => _setPressed(true),
+      onTapUp: (TapUpDetails _) => _setPressed(false),
+      onTapCancel: () => _setPressed(false),
+      child: badge,
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 列表项目符号（v3.3 §1.2：一级 decimal/disc，二级 lower-alpha/circle，三级 lower-roman）
+// ---------------------------------------------------------------------------
+
+/// 有序列表编号：1 → a，26 → z，27 → aa（CSS 的 `lower-alpha`）。
+String _lowerAlpha(int value) {
+  if (value <= 0) return '$value';
+  String out = '';
+  int n = value;
+  while (n > 0) {
+    final int rem = (n - 1) % 26;
+    out = String.fromCharCode(0x61 + rem) + out;
+    n = (n - 1) ~/ 26;
+  }
+  return out;
+}
+
+/// 有序列表编号（小写罗马数字，CSS 的 `lower-roman`，1 → i，4 → iv）。
+String _lowerRoman(int value) {
+  if (value <= 0 || value > 3999) return '$value';
+  const List<int> units = <int>[
+    1000,
+    900,
+    500,
+    400,
+    100,
+    90,
+    50,
+    40,
+    10,
+    9,
+    5,
+    4,
+    1,
+  ];
+  const List<String> symbols = <String>[
+    'm',
+    'cm',
+    'd',
+    'cd',
+    'c',
+    'xc',
+    'l',
+    'xl',
+    'x',
+    'ix',
+    'v',
+    'iv',
+    'i',
+  ];
+  final StringBuffer buffer = StringBuffer();
+  int n = value;
+  for (int i = 0; i < units.length; i++) {
+    while (n >= units[i]) {
+      buffer.write(symbols[i]);
+      n -= units[i];
+    }
+  }
+  return buffer.toString();
+}
+
+/// 列表项目符号：把 flutter_markdown 的默认 decimal / `•` 换成 v3.3 的分层字形。
+///
+/// 为什么不用 styleSheet：`MarkdownStyleSheet` 只能改 bullet 的字色字号，
+/// 编号字符本身由 `_buildBullet` 硬编码成 `1.` 和 `•`；`bulletBuilder` 是
+/// 这个版本唯一能改字形的入口（参数带 `nestLevel` 和 `index`）。
+Widget _buildMarkdownBullet(
+  BuildContext context,
+  MarkdownBulletParameters parameters,
+) {
+  final s = KeepsakeSkinColors.of(context);
+  final bool ordered = parameters.style == BulletStyle.orderedList;
+  final int number = parameters.index + 1;
+  final String label;
+  if (ordered) {
+    // 省略 break：三级及更深都按 lower-roman 处理（CSS 里 `ol ol ol` 起算。
+    switch (parameters.nestLevel) {
+      case 0:
+        label = '$number.';
+      case 1:
+        label = '${_lowerAlpha(number)}.';
+      default:
+        label = '${_lowerRoman(number)}.';
+    }
+  } else {
+    // disc / circle（三级起沿用 circle，AI 极少写到三级无序）。
+    label = parameters.nestLevel == 0 ? '•' : '◦';
+  }
+  return Text(
+    label,
+    textAlign: ordered ? TextAlign.right : TextAlign.center,
+    style: TextStyle(
+      fontSize: s.fsBody,
+      height: s.lineHeight,
+      color: s.c.onV,
+      fontFamily: s.metaFontFamily,
+    ),
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -365,31 +669,85 @@ MarkdownStyleSheet _keepsakeStyleSheet(BuildContext context) {
   // 为什么：字号 / 行高 / 圆角只能来自皮肤 token，页面写死会让三套皮肤长得一样。
   final s = KeepsakeSkinColors.of(context);
   final base = keepsakeMarkdownStyleSheet(theme);
+  final TextStyle body =
+      (base.p ?? const TextStyle()).copyWith(
+        fontSize: s.fsBody,
+        height: s.lineHeight,
+        color: s.c.onS,
+      );
   return base.copyWith(
     // 每个块的横向 14 = 气泡内边距 12/14（README §4.3）；纵向只带顶部
     // （底部留白由气泡自己补一次，否则相邻两块的 12 会叠成 24）。
     // 代码块自己不吃这个 padding，直接贴到气泡内缘（通栏出血）。
     pPadding: const EdgeInsets.fromLTRB(14, 12, 14, 0),
-    p: (base.p ?? const TextStyle()).copyWith(
-      fontSize: s.fsBody,
-      height: s.lineHeight,
-    ),
+    p: body,
     codeblockPadding: EdgeInsets.zero,
     codeblockDecoration: const BoxDecoration(),
     codeblockAlign: WrapAlignment.start,
     blockSpacing: 0,
-    listIndent: 22,
-    blockquotePadding: const EdgeInsets.fromLTRB(14, 6, 10, 6),
+    // v3.3 §1.2：列表 padding-left 20；bullet 与正文之间留 6。
+    listIndent: 20,
+    listBulletPadding: const EdgeInsets.only(right: 6),
+    listBullet: body.copyWith(color: s.c.onV),
     h1Padding: const EdgeInsets.fromLTRB(14, 12, 14, 4),
     h2Padding: const EdgeInsets.fromLTRB(14, 10, 14, 3),
     h3Padding: const EdgeInsets.fromLTRB(14, 8, 14, 2),
     tableColumnWidth: const IntrinsicColumnWidth(),
+    // ---- v3.3 §1.2 元素样式补齐 ----
+    // 粗体 700 / 斜体 italic：fromTheme 里默认值随 Material 走，这里钉死。
+    strong: (base.strong ?? const TextStyle()).copyWith(
+      fontWeight: FontWeight.w700,
+    ),
+    em: (base.em ?? const TextStyle()).copyWith(fontStyle: FontStyle.italic),
+    // 删除线：line-through + onV（和正文明确区分）。
+    del: (base.del ?? const TextStyle()).copyWith(
+      color: s.c.onV,
+      decoration: TextDecoration.lineThrough,
+      decorationColor: s.c.onV,
+    ),
+    // 链接：selBar + 1px 下划线。Flutter 没有 `text-underline-offset`，
+    // 用 1px 的 decorationThickness 让下划线尽量贴近 CSS 的细线观感。
+    a: (base.a ?? const TextStyle()).copyWith(
+      color: s.selectionBar,
+      decoration: TextDecoration.underline,
+      decorationColor: s.selectionBar,
+      decorationThickness: 1,
+    ),
+    // 引用块：左侧 2px selBar 竖线，文字 onV，不铺底色（v3.3 §1.2）。
+    blockquote: body.copyWith(color: s.c.onV),
+    blockquotePadding: const EdgeInsets.fromLTRB(12, 4, 10, 4),
+    blockquoteDecoration: BoxDecoration(
+      border: Border(
+        left: BorderSide(color: s.selectionBar, width: 2),
+      ),
+    ),
+    // 分隔线：1px ov。
+    horizontalRuleDecoration: BoxDecoration(
+      border: Border(top: BorderSide(color: s.c.ov)),
+    ),
   );
 }
 
 // ---------------------------------------------------------------------------
 // 图片
 // ---------------------------------------------------------------------------
+
+/// markdown 块的横向内边距（气泡内缘留白），见 [_keepsakeStyleSheet] 的 pPadding。
+const double kMarkdownHorizontalPadding = 14;
+
+/// 图片「max-width: 100%」（v3.3 §1.2）：不撑破气泡。
+///
+/// 为什么不能只靠 `config.width`：模型给的 `![x](url)` 没有尺寸，
+/// Image 会按图片原始像素铺开，宽图直接把气泡撑出屏幕；
+/// 这里按屏宽减两侧留白给出上限，Image 自己按比例缩。
+Widget _constrainImageWidth(BuildContext context, Widget child) {
+  final double maxWidth =
+      MediaQuery.sizeOf(context).width - kMarkdownHorizontalPadding * 2;
+  return ConstrainedBox(
+    constraints: BoxConstraints(maxWidth: maxWidth > 0 ? maxWidth : 0),
+    child: child,
+  );
+}
 
 /// markdown 图片统一入口：http(s) / data URI / 本地绝对路径 / 相对 [basePath]。
 Widget _buildImage(
@@ -413,37 +771,43 @@ Widget _buildImage(
     if (scheme == 'data') {
       final data = _decodeDataUri(uri.toString());
       if (data == null) return placeholder;
-      return ClipRRect(
-        borderRadius: s.rCard,
-        child: Image.memory(
-          data,
-          fit: BoxFit.contain,
-          width: width,
-          height: height,
+      return _constrainImageWidth(
+        context,
+        ClipRRect(
+          borderRadius: s.rCard,
+          child: Image.memory(
+            data,
+            fit: BoxFit.contain,
+            width: width,
+            height: height,
+          ),
         ),
       );
     }
     if (scheme == 'http' || scheme == 'https') {
-      return ClipRRect(
-        borderRadius: s.rCard,
-        child: Image.network(
-          uri.toString(),
-          fit: BoxFit.contain,
-          width: width,
-          height: height,
-          errorBuilder: (_, _, _) => placeholder,
-          loadingBuilder:
-              (BuildContext context, Widget child, ImageChunkEvent? event) {
-                if (event == null) return child;
-                return _ImagePlaceholder(
-                  label: alt.isEmpty ? '图片' : alt,
-                  icon: s.icon(
-                    filled: Icons.image_outlined,
-                    outlined: Icons.image_outlined,
-                  ),
-                  color: s.c.onV,
-                );
-              },
+      return _constrainImageWidth(
+        context,
+        ClipRRect(
+          borderRadius: s.rCard,
+          child: Image.network(
+            uri.toString(),
+            fit: BoxFit.contain,
+            width: width,
+            height: height,
+            errorBuilder: (_, _, _) => placeholder,
+            loadingBuilder:
+                (BuildContext context, Widget child, ImageChunkEvent? event) {
+                  if (event == null) return child;
+                  return _ImagePlaceholder(
+                    label: alt.isEmpty ? '图片' : alt,
+                    icon: s.icon(
+                      filled: Icons.image_outlined,
+                      outlined: Icons.image_outlined,
+                    ),
+                    color: s.c.onV,
+                  );
+                },
+          ),
         ),
       );
     }
@@ -455,14 +819,17 @@ Widget _buildImage(
         !path.startsWith('/')) {
       path = '$basePath/$path';
     }
-    return ClipRRect(
-      borderRadius: s.rCard,
-      child: Image.file(
-        File(path),
-        fit: BoxFit.contain,
-        width: width,
-        height: height,
-        errorBuilder: (_, _, _) => placeholder,
+    return _constrainImageWidth(
+      context,
+      ClipRRect(
+        borderRadius: s.rCard,
+        child: Image.file(
+          File(path),
+          fit: BoxFit.contain,
+          width: width,
+          height: height,
+          errorBuilder: (_, _, _) => placeholder,
+        ),
       ),
     );
   } catch (_) {

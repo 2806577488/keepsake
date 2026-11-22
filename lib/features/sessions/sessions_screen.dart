@@ -15,7 +15,9 @@
 /// - 顶部：导入进度条（`importTaskProvider` / `importProgressProvider`，批次 E），
 ///   完成后自动消失并 toast「已新增 N 个对话」；有失败时保留「有 N 条没导上」+「重试没导上的」。
 /// - 列表：按 `updated_at` 倒序（置顶优先），行 = 标题 / 相对时间 / 消息数；
-///   点进聊天页，⋮ 菜单 = 重命名 / 置顶 / 删除会话 / 补建角色卡；左滑删除（带确认）。
+///   点进聊天页，⋮ 菜单 = 重命名 / 置顶 / 删除会话；左滑删除（带确认）。
+///   v3.3 §2.2：「补建角色卡」「清理孤立角色卡」这类**影响所有会话**的批量修复
+///   已整体搬到「设置 › 数据维护」，会话列表的多选菜单里不再出现。
 /// - 搜索态：全局搜索结果（消息正文命中 + 所属会话标题），空态「没有找到包含「q」的内容」。
 /// - 空态：「点右下角「新对话」开始，或从设置里导入 DeepSeek 的导出包」。
 /// - FAB：「新对话」（先 `createSession` 再进 `ChatScreen`）。
@@ -29,7 +31,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:share_plus/share_plus.dart';
 
 import 'package:keepsake/core/brain/brain_service.dart';
-import 'package:keepsake/core/characters/card_backfill_task.dart';
 import 'package:keepsake/core/characters/character_service.dart';
 import 'package:keepsake/core/chat/blocks.dart';
 import 'package:keepsake/core/export/exporter.dart';
@@ -244,50 +245,10 @@ class _SessionsScreenState extends ConsumerState<SessionsScreen> {
     }
   }
 
-  /// 为缺少角色卡的会话补建（逐条让出事件循环，可随时关页面中断；重跑会跳过已有卡的会话）。
-  Future<void> _backfillCards() async {
-    final sessions = ref.read(orderedSessionsProvider).value ?? const <Session>[];
-    final missing = <Session>[
-      for (final session in sessions)
-        if ((session.characterId ?? '').isEmpty) session,
-    ];
-    if (missing.isEmpty) {
-      _toast('所有会话都已经有角色卡');
-      return;
-    }
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('补建角色卡'),
-        content: Text('有 ${missing.length} 个会话还没有角色卡，现在按会话内容逐个补建？'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('开始补建'),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true || !mounted) return;
-    // 只提示一次；补建过程不再逐条弹 toast（进度改在设置页「后台任务」看）。
-    _toast('正在补建角色卡（共 ${missing.length} 个），完成前可以继续操作');
-    // 交给全局后台任务：切到设置页也能看到「正在补建角色卡：done / total」。
-    final task = ref.read(cardBackfillProvider.notifier);
-    final CardBackfillResult result;
-    try {
-      result = await task.run(missing);
-    } catch (error) {
-      if (mounted) _toast('补建失败：$error');
-      return;
-    }
-    if (!mounted) return;
-    ref.invalidate(sessionsProvider);
-    _toast(result.message);
-  }
+  // 「为缺少角色卡的会话补建」已搬到「设置 › 数据维护」（v3.3 §2.2）：
+  // 补建是影响**所有会话**的批量数据修复，不是当前会话的操作。这里不再保留
+  // 任何入口；逻辑与进度在 features/settings/data_maintenance_section.dart，
+  // 底层仍是全局 cardBackfillProvider。
 
   // -------------------------------------------------------------------------
   // 列表内多选（删除 / 导出）
@@ -598,11 +559,6 @@ class _SessionsScreenState extends ConsumerState<SessionsScreen> {
               ),
               onTap: () => Navigator.of(sheetContext).pop('delete'),
             ),
-            ListTile(
-              leading: const Icon(Icons.badge_outlined),
-              title: const Text('为缺少角色卡的会话补建'),
-              onTap: () => Navigator.of(sheetContext).pop('backfill'),
-            ),
             const SizedBox(height: 8),
           ],
         ),
@@ -616,8 +572,6 @@ class _SessionsScreenState extends ConsumerState<SessionsScreen> {
         await _togglePin(session);
       case 'delete':
         if (await _confirmDelete(session)) await _deleteSession(session);
-      case 'backfill':
-        await _backfillCards();
     }
   }
 
@@ -666,8 +620,12 @@ class _SessionsScreenState extends ConsumerState<SessionsScreen> {
     final theme = Theme.of(context);
     // 皮肤 token 入口：只有这一份 UI，A/E/H 靠 token 变形（拍板稿 §1）。
     final s = KeepsakeSkinColors.of(context);
-    final sessions =
-        ref.watch(orderedSessionsProvider).value ?? const <Session>[];
+    // 多选顶栏的「全选」在会话还没加载完时必须是禁用态（v3.2 §2.5），
+    // 所以这里同时保留 AsyncValue 本体，而不只是取 .value。
+    final AsyncValue<List<Session>> sessionsAsync = ref.watch(
+      orderedSessionsProvider,
+    );
+    final sessions = sessionsAsync.value ?? const <Session>[];
     return Scaffold(
       appBar: AppBar(
         automaticallyImplyLeading: false,
@@ -731,7 +689,10 @@ class _SessionsScreenState extends ConsumerState<SessionsScreen> {
                   ),
               ]
             : _selecting
-            ? _buildSelectionActions(sessions)
+            ? _buildSelectionActions(
+                sessions,
+                loading: sessionsAsync.isLoading,
+              )
             : [
                 IconButton(
                   tooltip: '搜索',
@@ -781,21 +742,29 @@ class _SessionsScreenState extends ConsumerState<SessionsScreen> {
   }
 
   /// 选择态的 AppBar 按钮：全选/全不选、导出、删除（README §4.6、§6）。
-  List<Widget> _buildSelectionActions(List<Session> sessions) {
+  ///
+  /// [loading] 为 true（会话列表还在首屏加载）时，全选按钮**禁用**：
+  /// 图标 `onV` @38%、不可点（v3.2 §2.5）。这一格只用于全选按钮，不动列表项。
+  List<Widget> _buildSelectionActions(
+    List<Session> sessions, {
+    required bool loading,
+  }) {
     final s = KeepsakeSkinColors.of(context);
     final allSelected =
         sessions.isNotEmpty && _selectedIds.length == sessions.length;
     final empty = _selectedIds.isEmpty;
     return <Widget>[
       IconButton(
-        tooltip: allSelected ? '全不选' : '全选',
-        // §6：多选全选 `Icons.select_all`；尺寸/颜色跟皮肤。
+        tooltip: loading ? '正在加载会话…' : (allSelected ? '全不选' : '全选'),
+        // §6：多选全选 `Icons.select_all`；加载中/禁用态图标 onV @38%。
         icon: Icon(
           allSelected ? Icons.deselect : Icons.select_all,
           size: s.iconSize,
-          color: s.iconColor,
+          color: loading
+              ? s.c.onV.withValues(alpha: 0.38)
+              : s.iconColor,
         ),
-        onPressed: () => _toggleSelectAll(sessions),
+        onPressed: loading ? null : () => _toggleSelectAll(sessions),
       ),
       IconButton(
         tooltip: '导出选中',
@@ -837,6 +806,9 @@ class _SessionsScreenState extends ConsumerState<SessionsScreen> {
       controller: _searchController,
       focusNode: _searchFocus,
       autofocus: true,
+      // 光标：selBar、宽 2dp（v3.2 §2.1，整站输入框统一）。
+      cursorColor: s.c.selBar,
+      cursorWidth: 2,
       textInputAction: TextInputAction.search,
       onChanged: _onSearchChanged,
       decoration: InputDecoration(
@@ -1713,7 +1685,7 @@ class _DeleteProgressBannerState extends ConsumerState<_DeleteProgressBanner> {
                 ),
                 const SizedBox(height: 3),
                 ClipRRect(
-                  borderRadius: BorderRadius.circular(1),
+                  borderRadius: s.rPill,
                   child: LinearProgressIndicator(
                     value: task.fraction,
                     minHeight: 2,

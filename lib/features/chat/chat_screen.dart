@@ -1971,10 +1971,21 @@ class _AssistantBodyState extends State<_AssistantBody> {
         ),
       );
     }
+    final sources = widget.message.searchSources;
     return KeepsakeMarkdown(
       data: text,
       selectable: true,
       onTapLink: widget.onOpenLink,
+      // 引用角标 [N]：没有来源时不可点（仍是上标数字），有来源时弹出底部
+      // 列表并定位到第 N 条。
+      onCitationTap: sources.isEmpty
+          ? null
+          : (int n) => _showSourcesSheetFor(
+              context,
+              sources,
+              highlightIndex: n - 1,
+              onOpen: (String url) => widget.onOpenLink(url, url, ''),
+            ),
     );
   }
 }
@@ -2201,64 +2212,94 @@ class _SearchSourcesView extends StatelessWidget {
 
   /// 点开胶囊：从底部弹出完整来源列表。
   void _showSourcesSheet(BuildContext context) {
-    final skin = KeepsakeSkinColors.of(context);
-    showModalBottomSheet<void>(
-      context: context,
-      // 为什么：抓手统一由 [_SheetGrabber] 画（36×4），关掉主题自带的 32×4。
-      showDragHandle: false,
-      isScrollControlled: true,
-      shape: RoundedRectangleBorder(borderRadius: skin.rSheetTop),
-      builder: (sheetContext) {
-        final theme = Theme.of(sheetContext);
-        final scheme = theme.colorScheme;
-        final sheetSkin = KeepsakeSkinColors.of(sheetContext);
-        return SafeArea(
-          child: ConstrainedBox(
-            constraints: BoxConstraints(
-              maxHeight: MediaQuery.of(sheetContext).size.height * 0.7,
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: <Widget>[
-                const _SheetGrabber(),
-                Padding(
-                  // 弹层内距 20（sheetPadding）。
-                  padding: const EdgeInsets.fromLTRB(
-                    KeepsakeTheme.sheetPadding,
-                    0,
-                    KeepsakeTheme.sheetPadding,
-                    8,
-                  ),
-                  child: Row(
-                    children: <Widget>[
-                      Icon(
-                        sheetSkin.icon(
-                          filled: Icons.language,
-                          outlined: Icons.language,
-                        ),
-                        size: 20,
-                        color: scheme.primary,
-                      ),
-                      const SizedBox(width: 6),
-                      Text(
-                        '搜索结果（${sources.length}）',
-                        // 弹层标题 18 + 皮肤字重。
-                        style: theme.textTheme.titleMedium?.copyWith(
-                          fontSize: 18,
-                          fontWeight: sheetSkin.titleWeight,
-                        ),
-                      ),
-                    ],
-                  ),
+    _showSourcesSheetFor(context, sources, onOpen: onOpen);
+  }
+}
+
+/// 从底部弹出完整来源列表；`highlightIndex` 非空时定位并高亮该条
+/// （引用角标 [N] 点进来的场景）。
+void _showSourcesSheetFor(
+  BuildContext context,
+  List<ChatSearchSource> sources, {
+  int? highlightIndex,
+  void Function(String url)? onOpen,
+}) {
+  final skin = KeepsakeSkinColors.of(context);
+  final itemKey = highlightIndex == null ? null : GlobalKey();
+  showModalBottomSheet<void>(
+    context: context,
+    // 为什么：抓手统一由 [_SheetGrabber] 画（36×4），关掉主题自带的 32×4。
+    showDragHandle: false,
+    isScrollControlled: true,
+    shape: RoundedRectangleBorder(borderRadius: skin.rSheetTop),
+    builder: (sheetContext) {
+      final theme = Theme.of(sheetContext);
+      final scheme = theme.colorScheme;
+      final sheetSkin = KeepsakeSkinColors.of(sheetContext);
+      if (itemKey != null) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          final target = itemKey.currentContext;
+          if (target != null) {
+            Scrollable.ensureVisible(target, alignment: 0.2);
+          }
+        });
+      }
+      return SafeArea(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(sheetContext).size.height * 0.7,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              const _SheetGrabber(),
+              Padding(
+                // 弹层内距 20（sheetPadding）。
+                padding: const EdgeInsets.fromLTRB(
+                  KeepsakeTheme.sheetPadding,
+                  0,
+                  KeepsakeTheme.sheetPadding,
+                  8,
                 ),
-                Flexible(
-                  child: ListView.builder(
-                    shrinkWrap: true,
-                    itemCount: sources.length,
-                    itemBuilder: (_, index) {
-                      final source = sources[index];
-                      final snippet = (source.snippet ?? '').trim();
-                      return ListTile(
+                child: Row(
+                  children: <Widget>[
+                    Icon(
+                      sheetSkin.icon(
+                        filled: Icons.language,
+                        outlined: Icons.language,
+                      ),
+                      size: 20,
+                      color: scheme.primary,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      '搜索结果（${sources.length}）',
+                      // 弹层标题 18 + 皮肤字重。
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontSize: 18,
+                        fontWeight: sheetSkin.titleWeight,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Flexible(
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: sources.length,
+                  itemBuilder: (_, index) {
+                    final source = sources[index];
+                    final snippet = (source.snippet ?? '').trim();
+                    final highlighted = index == highlightIndex;
+                    return Container(
+                      key: highlighted ? itemKey : null,
+                      decoration: highlighted
+                          ? BoxDecoration(
+                              color: sheetSkin.c.selBg,
+                              borderRadius: sheetSkin.rCard,
+                            )
+                          : null,
+                      child: ListTile(
                         dense: true,
                         title: Text(
                           source.displayTitle,
@@ -2288,19 +2329,19 @@ class _SearchSourcesView extends StatelessWidget {
                         ),
                         onTap: () {
                           Navigator.of(sheetContext).pop();
-                          onOpen(source.url);
+                          onOpen?.call(source.url);
                         },
-                      );
-                    },
-                  ),
+                      ),
+                    );
+                  },
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
-        );
-      },
-    );
-  }
+        ),
+      );
+    },
+  );
 }
 
 /// 消息附件区（图片缩略图 / 文件卡片）。
@@ -3113,12 +3154,20 @@ class _InputBarState extends State<_InputBar> {
                       minLines: 1,
                       maxLines: widget.compact ? 3 : 6,
                       textInputAction: TextInputAction.newline,
+                      // 光标：selBar、宽 2dp（v3.2 §2.1）。聚焦边框由主题
+                      // inputDecorationTheme 给（1.5px onS），这里不重复写。
+                      cursorColor: skin.c.selBar,
+                      cursorWidth: 2,
                       // 输入框：高 48 / 圆角 rField / 底 highest / hint onV
                       // （SPEC §4.4；底/圆角/内距由主题 inputDecorationTheme 给）。
                       // 为什么：正文字号跟皮肤（H 16），不再固定 bodyLarge 的 15。
                       style: theme.textTheme.bodyLarge?.copyWith(
                         fontSize: skin.fsBody,
                       ),
+                      // 流式输出中 / 导入中 / 删除中**不禁用**输入（v3.2 §2.2）：
+                      // 只禁「发送」，不禁「输入」。
+                      // 占位符用 hintText：Flutter 只在文本为空时显示，
+                      // 聚焦时仍可见，输入第一个字符才消失（v3.2 §2.1）。
                       decoration: const InputDecoration(
                         hintText: '发消息…',
                         contentPadding: EdgeInsets.symmetric(
@@ -3179,28 +3228,31 @@ class _SendStopButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final skin = KeepsakeSkinColors.of(context);
     // 发送键 44×44、圆角 rSend（A 胶囊 / E 8 / H 14）；底/前景来自皮肤（SPEC §4.4）。
-    final bool enabled = canSend && !sending && !streaming;
+    // v3.2 §2.2：**只禁发送，不禁输入**。三态：
+    // ① 请求在途（提交中 / 流式输出中）→ 停止键，红 errC；
+    // ② 有内容可发 → sendBg / sendFg；
+    // ③ 无可发内容 → 禁用态：底 high、图标 onV @38%（不给输入框加灰底）。
+    final bool inFlight = sending || streaming;
+    final bool enabled = canSend && !inFlight;
     final Color background;
     final Color foreground;
-    if (streaming) {
-      // 为什么：停止态是「打断」语义，用危险色 errBg/onErrBg，不用主色块。
+    if (inFlight) {
+      // 为什么：停止态是「打断」语义，用危险色 errBg 底 + errC 图标。
       background = skin.c.errBg;
-      foreground = skin.c.onErrBg;
+      foreground = skin.c.errC;
     } else if (enabled) {
       background = skin.sendBg;
       foreground = skin.sendFg;
     } else {
-      // 禁用态只改透明度，不改尺寸（§5 规则 1）。
-      background = skin.sendBg.withValues(alpha: 0.45);
-      foreground = skin.sendFg.withValues(alpha: 0.8);
+      // 禁用态只改颜色，不改尺寸（§5 规则 1）：底 high、图标 onV @38%。
+      background = skin.c.high;
+      foreground = skin.c.onV.withValues(alpha: 0.38);
     }
-    final VoidCallback? action = streaming
-        ? onStop
-        : (enabled ? onSend : null);
+    final VoidCallback? action = inFlight ? onStop : (enabled ? onSend : null);
     return Padding(
       padding: const EdgeInsets.only(bottom: 2),
       child: Tooltip(
-        message: streaming ? '停止' : '发送',
+        message: inFlight ? '停止' : '发送',
         child: SizedBox(
           width: KeepsakeTheme.sendSize,
           height: KeepsakeTheme.sendSize,
@@ -3211,7 +3263,7 @@ class _SendStopButton extends StatelessWidget {
               onTap: action,
               customBorder: RoundedRectangleBorder(borderRadius: skin.rSend),
               child: Center(
-                child: streaming
+                child: inFlight
                     ? Icon(
                         skin.icon(
                           filled: Icons.stop,
@@ -3219,15 +3271,6 @@ class _SendStopButton extends StatelessWidget {
                         ),
                         size: 20,
                         color: foreground,
-                      )
-                    : sending
-                    ? SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: foreground,
-                        ),
                       )
                     // §6：发送图标 Icons.arrow_upward，20。
                     : Icon(Icons.arrow_upward, size: 20, color: foreground),

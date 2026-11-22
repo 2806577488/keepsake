@@ -385,9 +385,14 @@ abstract final class KeepsakeTheme {
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: tokens.rField,
-          borderSide: BorderSide(color: c.selBar, width: 1.5),
+          // 聚焦态：边框 1px → 1.5px、色 outline → onS（v3.2 §2.1）。
+          // 1.5px 而不是 2px：2px 会让输入框视觉宽度变 1px，引发抖动。
+          borderSide: BorderSide(color: c.onS, width: 1.5),
         ),
       ),
+      // 文本选区 / 光标：光标 selBar、宽 2dp（v3.2 §2.1）。
+      // 宽度的全局默认在 ThemeData 里没有出口，输入框上再显式写 cursorWidth: 2。
+      textSelectionTheme: TextSelectionThemeData(cursorColor: c.selBar),
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
           minimumSize: const Size(0, kSheetButtonHeight),

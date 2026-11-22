@@ -14,6 +14,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:keepsake/core/settings.dart';
+import 'package:keepsake/core/theme.dart';
 import 'package:keepsake/core/usage/usage.dart';
 import 'package:keepsake/core/usage/usage_store.dart';
 
@@ -87,6 +88,7 @@ class _Shell extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final hintText = hint;
+    final s = KeepsakeSkinColors.of(context);
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
       child: Container(
@@ -95,7 +97,7 @@ class _Shell extends StatelessWidget {
           color: theme.colorScheme.surfaceContainerHighest.withValues(
             alpha: 0.5,
           ),
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: s.rCard,
         ),
         child: Row(
           children: [

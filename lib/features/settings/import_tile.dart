@@ -8,6 +8,9 @@
 /// 1. 本地 ZIP（file_picker）；
 /// 2. DeepSeek 历史记录下载链接（https://deepseek-chat-history-exports-prod.obs...zip?...），
 ///    点一下直接下载到临时目录再导入；打开时若剪贴板里就是这种链接，优先提示「直接下载并导入」。
+///
+/// 存储权限被拒（部分 ROM / 旧系统）时**不弹窗**：在行下方显示页面内卡片
+/// （`PermissionDeniedCard`，v3.2 §2.4），永久拒绝时按钮换「去设置」。
 library;
 
 import 'dart:async';
@@ -18,6 +21,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -26,6 +30,8 @@ import 'package:keepsake/core/characters/character_service.dart';
 import 'package:keepsake/core/db/database.dart';
 import 'package:keepsake/core/import/import_task.dart';
 import 'package:keepsake/core/providers.dart';
+import 'package:keepsake/core/theme.dart';
+import 'package:keepsake/features/settings/permission_card.dart';
 
 /// 是否是看起来像 DeepSeek 导出 ZIP 的下载链接。
 bool _looksLikeExportUrl(String raw) {
@@ -52,6 +58,43 @@ class _ImportHistoryTileState extends ConsumerState<ImportHistoryTile> {
   bool _picking = false;
   bool _downloading = false;
   double? _downloadProgress;
+
+  /// 存储权限被拒时的页内卡片状态（v3.2 §2.4）；null = 不显示卡片。
+  _PermissionIssue? _permission;
+
+  /// 判断异常是不是「存储权限被拒」。
+  ///
+  /// Android 上 SAF 一般不需要存储权限，但部分 ROM / 旧系统选文件仍会抛
+  /// `permission_denied` / `Permission denied` / `EACCES`；这几种都按权限问题
+  /// 处理，**不弹窗**，改为页面内卡片引导授权。
+  static bool _looksLikePermissionError(Object error) {
+    final String text = error.toString().toLowerCase();
+    return text.contains('permission') ||
+        text.contains('denied') ||
+        text.contains('eacces');
+  }
+
+  /// 主按钮：先请求存储权限；永久拒绝时引导去系统设置。
+  Future<void> _onGrantPressed() async {
+    final _PermissionIssue? issue = _permission;
+    if (issue != null && issue.permanent) {
+      await openAppSettings();
+      return;
+    }
+    final PermissionStatus status = await Permission.storage.request();
+    if (!mounted) return;
+    if (status.isGranted || status.isLimited) {
+      setState(() => _permission = null);
+      await _import();
+      return;
+    }
+    // 还是拒绝：永久拒绝就把按钮换成「去设置」并补一句说明。
+    setState(
+      () => _permission = _PermissionIssue(
+        permanent: status.isPermanentlyDenied,
+      ),
+    );
+  }
 
   void _toast(String message) {
     final messenger = ScaffoldMessenger.maybeOf(context);
@@ -290,7 +333,19 @@ class _ImportHistoryTileState extends ConsumerState<ImportHistoryTile> {
       if (!mounted) return;
       await _confirmAndStart(File(path));
     } catch (error) {
-      if (mounted) _toast('导入失败：$error');
+      if (!mounted) return;
+      // 权限被拒：不弹窗，页面内出卡片（v3.2 §2.4）。
+      if (_looksLikePermissionError(error)) {
+        final PermissionStatus status = await Permission.storage.status;
+        if (!mounted) return;
+        setState(
+          () => _permission = _PermissionIssue(
+            permanent: status.isPermanentlyDenied,
+          ),
+        );
+        return;
+      }
+      _toast('导入失败：$error');
     } finally {
       if (mounted) setState(() => _picking = false);
     }
@@ -440,6 +495,7 @@ class _ImportHistoryTileState extends ConsumerState<ImportHistoryTile> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final s = KeepsakeSkinColors.of(context);
     final progress = ref.watch(importProgressProvider).value;
     final running = progress?.running ?? false;
     final failures = progress != null && !running && progress.hasFailures;
@@ -482,6 +538,15 @@ class _ImportHistoryTileState extends ConsumerState<ImportHistoryTile> {
               : const Icon(Icons.chevron_right),
           onTap: running ? null : _import,
         ),
+        if (_permission != null)
+          // 权限被拒：页面内卡片（不是弹窗，v3.2 §2.4）。
+          PermissionDeniedCard(
+            title: '需要存储权限才能导入',
+            description: '从 DeepSeek 导出的对话存在手机里，读取需要授权。',
+            permanent: _permission!.permanent,
+            onGrant: () => unawaited(_onGrantPressed()),
+            onLater: () => setState(() => _permission = null),
+          ),
         if (running || _downloading)
           Padding(
             padding: const EdgeInsets.fromLTRB(72, 0, 16, 8),
@@ -490,7 +555,7 @@ class _ImportHistoryTileState extends ConsumerState<ImportHistoryTile> {
                   ? _downloadProgress
                   : progress?.fraction,
               minHeight: 3,
-              borderRadius: BorderRadius.circular(2),
+              borderRadius: s.rPill,
             ),
           ),
       ],
@@ -501,6 +566,15 @@ class _ImportHistoryTileState extends ConsumerState<ImportHistoryTile> {
 class _DownloadError implements Exception {
   const _DownloadError(this.message);
   final String message;
+}
+
+/// 存储权限被拒的状态（v3.2 §2.4）。
+class _PermissionIssue {
+  const _PermissionIssue({this.permanent = false});
+
+  /// 是否是「永久拒绝」（用户选了「不再询问」）：
+  /// 主按钮换「去设置」，并补一句「需要到系统设置里开启」。
+  final bool permanent;
 }
 
 /// 导入时选的建卡模式。
