@@ -13,9 +13,11 @@
 ///    （模型上下文窗口，用于计算对话占用率）；
 /// 4. **外观**：主题（跟随系统 / 浅色 / 深色，`Settings.themeMode`）；
 /// 5. **后台任务**：导入进度（`importProgressProvider`）+ 补建角色卡进度
-///    （`cardBackfillProvider`），只显示不启动；
+///    （`cardBackfillProvider`）+ 清理孤立角色卡进度（`cardCleanupProvider`），
+///    只显示不启动（启动按钮在「数据维护」区）；
 /// 6. **数据**：「数据全部存在本机」+ 导入历史对话 + 导出备份；
-/// 7. **关于**：`Keepsake（留声）` + 版本号（package_info_plus）。
+/// 7. **数据维护**：修复会话数据 / 清理孤立角色卡（v3.3 §2.3，无问题时整块不显示）；
+/// 8. **关于**：`Keepsake（留声）` + 版本号（package_info_plus）。
 ///
 /// 对话页只保留「本会话」用量条（`features/chat/session_usage_bar.dart`），
 /// 不再出现全局总计条。
@@ -30,6 +32,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import 'package:keepsake/core/brain/brain_service.dart';
 import 'package:keepsake/core/characters/card_backfill_task.dart';
+import 'package:keepsake/core/characters/card_cleanup_task.dart';
 import 'package:keepsake/core/import/import_task.dart';
 import 'package:keepsake/core/providers.dart';
 import 'package:keepsake/core/settings.dart';
@@ -38,6 +41,7 @@ import 'package:keepsake/core/theme.dart' show KeepsakeSkinColors, KeepsakeTheme
 import 'package:keepsake/core/update/update_service.dart';
 import 'package:keepsake/features/settings/export_tile.dart';
 import 'package:keepsake/features/sessions/delete_task.dart';
+import 'package:keepsake/features/settings/data_maintenance_section.dart';
 import 'package:keepsake/features/settings/import_tile.dart';
 import 'package:keepsake/features/settings/characters_screen.dart';
 import 'package:keepsake/features/settings/provider_section.dart';
@@ -631,6 +635,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             const ImportHistoryTile(),
             const ExportBackupTile(),
 
+            // 「数据维护」（v3.3 §2.3）：批量修复入口只在这里。区块内部自带
+            // 「数据维护」分区标题，没有需要修的东西时**连标题一起消失**。
+            const DataMaintenanceSection(),
+
             const _SectionTitle('关于'),
             const _UpdateTile(),
             const _AboutTile(),
@@ -641,14 +649,15 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 }
 
-/// 「后台任务」区块：导入进度 + 补建角色卡进度。
+/// 「后台任务」区块：导入进度 + 补建角色卡进度 + 清理孤立角色卡进度。
 ///
 /// - 导入：watch 现有 `importProgressProvider`（`ImportTask`），显示
 ///   `ImportProgress.label` + `fraction` 进度条（跑完且没失败时整行隐藏）；
 /// - 补建角色卡：watch `cardBackfillProvider`（`CardBackfillTask`），
-///   跑的时候显示「正在补建角色卡：done / total」+ 进度条，不跑时不显示该行。
+///   跑的时候显示「正在补建角色卡：done / total」+ 进度条，不跑时不显示该行；
+/// - 清理孤立角色卡：watch `cardCleanupProvider`（`CardCleanupTask`），同上。
 ///
-/// 两条任务都可能由别的页面启动（导入在设置页 / 列表顶部，补建在会话列表），
+/// 两条角色卡任务都由「设置 › 数据维护」启动（v3.3 §2.2 把批量修复收进设置），
 /// 这里只负责显示，不提供启动按钮。
 class _BackgroundTasksSection extends ConsumerWidget {
   const _BackgroundTasksSection();
@@ -660,6 +669,7 @@ class _BackgroundTasksSection extends ConsumerWidget {
     final s = KeepsakeSkinColors.of(context);
     final ImportProgress? progress = ref.watch(importProgressProvider).value;
     final CardBackfillProgress backfill = ref.watch(cardBackfillProvider);
+    final CardCleanupProgress cleanup = ref.watch(cardCleanupProvider);
     final DeleteTaskState deleteTask = ref.watch(deleteTaskProvider);
 
     final List<Widget> rows = <Widget>[];
@@ -690,6 +700,15 @@ class _BackgroundTasksSection extends ConsumerWidget {
           leading: const Icon(Icons.badge_outlined),
           title: Text(backfill.label),
           subtitle: _ProgressBar(fraction: backfill.fraction),
+        ),
+      );
+    }
+    if (cleanup.running) {
+      rows.add(
+        ListTile(
+          leading: const Icon(Icons.cleaning_services_outlined),
+          title: Text(cleanup.label),
+          subtitle: _ProgressBar(fraction: cleanup.fraction),
         ),
       );
     }
@@ -967,7 +986,7 @@ class _UpdateTileState extends State<_UpdateTile> {
 
   /// 有新版时的确认对话框：版本号 + 发布说明尾部几行。
   Future<void> _confirm(UpdateInfo info) async {
-    final notes = _tailLines(info.notes);
+    final notes = _userNotes(info.notes);
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) {
@@ -1201,19 +1220,44 @@ class _UpdateTileState extends State<_UpdateTile> {
       );
   }
 
-  /// 发布说明只取尾部若干行（原文通常是「新功能 → 修复 → 校验」）。
-  static String _tailLines(String notes, {int maxLines = 8}) {
-    final lines = notes
-        .replaceAll('\r\n', '\n')
-        .split('\n')
-        .map((line) => line.trimRight())
-        .toList();
-    while (lines.isNotEmpty && lines.last.trim().isEmpty) {
-      lines.removeLast();
+  /// 发布说明给用户看的版本：去掉 Markdown 标记和技术性段落。
+  ///
+  /// Release body 是给工程核对的（含 `###` 标题、代码块、签名证书、
+  /// SHA256、patches.json 这些内容）。之前直接把它塞进更新弹窗，真机上就
+  /// 出现了「### 签名证书…」「```」这种裸符号——弹窗是给用户看的，
+  /// 安装提示和差分提示这里另有固定文案，技术信息一律过滤。
+  static String _userNotes(String notes, {int maxLines = 6}) {
+    final out = <String>[];
+    var inFence = false;
+    for (final raw in notes.replaceAll('\r\n', '\n').split('\n')) {
+      final trimmed = raw.trim();
+      if (trimmed.startsWith('```')) {
+        inFence = !inFence;
+        continue;
+      }
+      if (inFence) continue;
+      final lower = trimmed.toLowerCase();
+      if (lower.contains('sha256') ||
+          lower.contains('cert-') ||
+          lower.contains('签名证书') ||
+          lower.contains('patches.json') ||
+          lower.contains('arm64.apk') ||
+          lower.contains('-arm.apk') ||
+          lower.contains('universal.apk') ||
+          lower.contains('资产')) {
+        continue;
+      }
+      final text = trimmed
+          .replaceAll(RegExp(r'^#{1,6}\s*'), '')
+          .replaceAll(RegExp(r'^\s*[-*+]\s+'), '· ')
+          .replaceAll('**', '')
+          .replaceAll('`', '')
+          .trim();
+      if (text.isEmpty) continue;
+      out.add(text);
+      if (out.length >= maxLines) break;
     }
-    if (lines.isEmpty) return '';
-    final start = lines.length > maxLines ? lines.length - maxLines : 0;
-    return lines.sublist(start).join('\n');
+    return out.join('\n');
   }
 
   static String _size(int bytes) {
