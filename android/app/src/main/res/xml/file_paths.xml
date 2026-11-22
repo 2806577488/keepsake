@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- FileProvider 可共享给系统安装器的目录白名单（随 AndroidManifest.xml 一起引用）。
+
+     lib/core/update/update_service.dart 的下载目录是
+     getExternalStorageDirectory()/updates/ = /storage/emulated/0/Android/data/<applicationId>/files/updates/，
+     对应 <external-files-path>；拿不到外部存储时退到 getTemporaryDirectory()/updates/，
+     对应 <cache-path>。任务书要求的 <external-path>（Environment.getExternalStorageDirectory()）
+     也保留，便于将来把安装包放到公共外部存储。 -->
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Context.getExternalFilesDir(null)/updates/ -->
+    <external-files-path name="updates" path="updates/"/>
+    <!-- Environment.getExternalStorageDirectory()/updates/（任务书口径） -->
+    <external-path name="external_updates" path="updates/"/>
+    <!-- 应用 cache 根目录（临时目录回退） -->
+    <cache-path name="cache" path="/"/>
+</paths>

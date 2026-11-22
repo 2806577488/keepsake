@@ -10,6 +10,8 @@ pubspec.lock
 android/.gradle/
 android/local.properties
 android/app/.cxx/
+android/key.properties
+android/keystore.jks
 **/*.jks
 **/*.keystore
 

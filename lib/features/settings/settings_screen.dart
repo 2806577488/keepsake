@@ -21,6 +21,8 @@
 /// 不再出现全局总计条。
 library;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:package_info_plus/package_info_plus.dart';
@@ -30,6 +32,7 @@ import 'package:keepsake/core/characters/card_backfill_task.dart';
 import 'package:keepsake/core/import/import_task.dart';
 import 'package:keepsake/core/providers.dart';
 import 'package:keepsake/core/settings.dart';
+import 'package:keepsake/core/update/update_service.dart';
 import 'package:keepsake/features/settings/export_tile.dart';
 import 'package:keepsake/features/settings/import_tile.dart';
 import 'package:keepsake/features/settings/characters_screen.dart';
@@ -483,6 +486,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             const ExportBackupTile(),
 
             const _SectionTitle('关于'),
+            const _UpdateTile(),
             const _AboutTile(),
           ],
         ),
@@ -662,3 +666,286 @@ class _AboutTileState extends State<_AboutTile> {
     );
   }
 }
+
+/// 「检查更新」行：显示当前版本；检查到新版本时右侧点亮红点（不弹窗打扰）。
+///
+/// 点击 → 检查 → 有新版弹对话框（版本号 + 发布说明尾部几行）→「下载并安装」→
+/// 下载进度对话框 → 交给系统安装器。没有更新时 toast「已是最新版本」。
+class _UpdateTile extends StatefulWidget {
+  const _UpdateTile();
+
+  @override
+  State<_UpdateTile> createState() => _UpdateTileState();
+}
+
+class _UpdateTileState extends State<_UpdateTile> {
+  /// 当前安装版本（读不到时为 null，行内显示占位文案）。
+  String? _current;
+
+  /// 已确认可用的新版本；为空表示没有更新。
+  UpdateInfo? _pending;
+
+  bool _checking = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _bootstrap();
+  }
+
+  /// 首帧后：先拿本机版本号，再做一次静默检查（只点亮红点）。
+  Future<void> _bootstrap() async {
+    try {
+      final current = await UpdateService.currentVersion();
+      if (mounted) setState(() => _current = current);
+    } on UpdateException catch (error) {
+      // 读不到版本不该打断设置页，但原因要留痕。
+      debugPrint('读取本机版本失败：${error.message}');
+    }
+    await _check(silent: true);
+  }
+
+  Future<void> _check({required bool silent}) async {
+    if (_checking || !mounted) return;
+    setState(() => _checking = true);
+    try {
+      final info = await UpdateService.check();
+      if (!mounted) return;
+      setState(() {
+        _current = info.current;
+        _pending = info.hasUpdate ? info : null;
+      });
+      if (silent) return;
+      if (!info.hasUpdate) {
+        _toast('已是最新版本');
+        return;
+      }
+      await _confirm(info);
+    } on UpdateException catch (error) {
+      debugPrint('检查更新失败（silent=$silent）：${error.message}');
+      if (!silent && mounted) _toast(error.message);
+    } catch (error) {
+      debugPrint('检查更新异常（silent=$silent）：$error');
+      if (!silent && mounted) _toast('检查更新失败：$error');
+    } finally {
+      if (mounted) setState(() => _checking = false);
+    }
+  }
+
+  /// 有新版时的确认对话框：版本号 + 发布说明尾部几行。
+  Future<void> _confirm(UpdateInfo info) async {
+    final notes = _tailLines(info.notes);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        final theme = Theme.of(dialogContext);
+        return AlertDialog(
+          title: Text('发现新版本 ${info.latest}'),
+          content: SizedBox(
+            width: 420,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '当前版本 ${info.current}',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                if (notes.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxHeight: 180),
+                    child: SingleChildScrollView(
+                      child: Text(
+                        notes,
+                        style: theme.textTheme.bodySmall,
+                      ),
+                    ),
+                  ),
+                ],
+                if (info.apkUrl == null) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    '这个版本没有附带 APK，请到 Release 页面手动下载。',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.error,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('稍后'),
+            ),
+            FilledButton(
+              onPressed: info.apkUrl == null
+                  ? null
+                  : () => Navigator.of(dialogContext).pop(true),
+              child: const Text('下载并安装'),
+            ),
+          ],
+        );
+      },
+    );
+    if (confirmed != true || !mounted) return;
+    await _downloadAndInstall(info);
+  }
+
+  /// 下载（进度对话框）→ 打开系统安装器；缺权限时跳系统设置。
+  Future<void> _downloadAndInstall(UpdateInfo info) async {
+    if (info.apkUrl == null) {
+      _toast('这个版本没有 APK 安装包');
+      return;
+    }
+    // 进度对话框的值：fraction 为 null 表示总长度未知（转圈）。
+    final fraction = ValueNotifier<double?>(0);
+    final status = ValueNotifier<String>('准备下载…');
+    final navigator = Navigator.of(context, rootNavigator: true);
+
+    // 不 await：先让对话框挂上去，再靠 navigator.pop 收起。
+    unawaited(
+      showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('下载更新'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              ValueListenableBuilder<double?>(
+                valueListenable: fraction,
+                builder: (context, value, child) => LinearProgressIndicator(
+                  value: value,
+                  minHeight: 4,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(height: 12),
+              ValueListenableBuilder<String>(
+                valueListenable: status,
+                builder: (context, value, child) => Text(
+                  value,
+                  style: Theme.of(dialogContext).textTheme.bodySmall,
+                ),
+              ),
+            ],
+          ),
+          actions: const <Widget>[],
+        ),
+      ),
+    );
+
+    var closed = false;
+    void closeProgress() {
+      if (closed) return;
+      closed = true;
+      navigator.pop();
+    }
+
+    try {
+      final file = await UpdateService.download(
+        info,
+        onProgress: (received, total) {
+          if (total > 0) {
+            fraction.value = (received / total).clamp(0.0, 1.0);
+            status.value =
+                '已下载 ${_size(received)} / ${_size(total)}'
+                '（${(received * 100 / total).toStringAsFixed(0)}%）';
+          } else {
+            fraction.value = null;
+            status.value = '已下载 ${_size(received)}';
+          }
+        },
+      );
+      status.value = '下载完成，正在打开安装器…';
+      closeProgress();
+      await UpdateService.installApk(file.path);
+      if (mounted) _toast('已打开系统安装器，按提示完成安装');
+    } on NeedInstallPermission catch (error) {
+      closeProgress();
+      if (mounted) _toast('${error.message}，已打开设置，允许后请重试');
+      await UpdateService.openInstallSettings();
+    } on UpdateException catch (error) {
+      closeProgress();
+      if (mounted) _toast(error.message);
+    } catch (error) {
+      closeProgress();
+      if (mounted) _toast('下载更新失败：$error');
+    } finally {
+      // 退场动画期间 ValueListenableBuilder 仍挂着监听，这里不 dispose（交给 GC），
+      // 与上面 TextEditingController 的处理保持一致。
+      closeProgress();
+    }
+  }
+
+  void _toast(String message) {
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    messenger
+      ?..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
+      );
+  }
+
+  /// 发布说明只取尾部若干行（原文通常是「新功能 → 修复 → 校验」）。
+  static String _tailLines(String notes, {int maxLines = 8}) {
+    final lines = notes
+        .replaceAll('\r\n', '\n')
+        .split('\n')
+        .map((line) => line.trimRight())
+        .toList();
+    while (lines.isNotEmpty && lines.last.trim().isEmpty) {
+      lines.removeLast();
+    }
+    if (lines.isEmpty) return '';
+    final start = lines.length > maxLines ? lines.length - maxLines : 0;
+    return lines.sublist(start).join('\n');
+  }
+
+  static String _size(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    final kb = bytes / 1024;
+    if (kb < 1024) return '${kb.toStringAsFixed(0)} KB';
+    return '${(kb / 1024).toStringAsFixed(1)} MB';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final current = _current;
+    final pending = _pending;
+    final subtitle = current == null
+        ? '正在读取当前版本…'
+        : (pending != null ? '发现新版本 ${pending.latest}' : '当前版本 $current');
+
+    return ListTile(
+      leading: const Icon(Icons.system_update_alt),
+      title: const Text('检查更新'),
+      subtitle: Text(subtitle),
+      trailing: _checking
+          ? const SizedBox(
+              width: 18,
+              height: 18,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          : pending != null
+          ? Container(
+              width: 10,
+              height: 10,
+              decoration: BoxDecoration(
+                color: theme.colorScheme.error,
+                shape: BoxShape.circle,
+              ),
+            )
+          : const Icon(Icons.chevron_right),
+      onTap: _checking ? null : () => _check(silent: false),
+    );
+  }
+}
+

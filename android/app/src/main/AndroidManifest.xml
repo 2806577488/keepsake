@@ -7,6 +7,8 @@
     <uses-permission android:name="android.permission.CAMERA"/>
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES"/>
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32"/>
+    <!-- 应用内更新：允许拉起系统安装器安装下载好的 APK（Android 8.0+ 还需用户手动授权）。 -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
 
     <!-- package visibility：PROCESS_TEXT（Flutter 引擎 ProcessTextPlugin）+ GET_CONTENT（file_picker） -->
     <queries>
@@ -43,6 +45,17 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+        <!-- 应用内更新：把下载到 files/updates（或 cache）的 APK 以 content:// 交给系统安装器。
+             authorities 必须与 MainActivity.kt 里 FileProvider.getUriForFile 的第二个参数一致。 -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths"/>
+        </provider>
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data
