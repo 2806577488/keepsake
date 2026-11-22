@@ -104,8 +104,26 @@ jobs:
         if: env.KEYSTORE_BASE64 == ''
         run: echo '未配置签名 Secrets，release APK 将使用 debug 签名。'
 
+      - name: 缓存 Gradle 依赖
+        uses: gradle/actions/setup-gradle@v4
+
       - name: 构建 release APK
-        run: flutter build apk --release --target-platform android-arm64
+        run: |
+          set -euo pipefail
+          # Maven Central 会对 CI 共享 IP 返回 429（Too Many Requests），
+          # 这是临时性限流：失败后重试，最多 3 次。
+          for attempt in 1 2 3; do
+            echo "构建尝试 $attempt/3"
+            if flutter build apk --release --target-platform android-arm64; then
+              exit 0
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              echo '构建失败，20 秒后重试（大概率是 Maven 限流，不是代码问题）'
+              sleep 20
+            fi
+          done
+          echo '三次构建均失败，请查看上方 Gradle 日志' >&2
+          exit 1
 
       - name: 重命名产物并生成 SHA256
         id: artifact

@@ -1612,9 +1612,8 @@ class _MessageBubble extends StatelessWidget {
       ),
     );
 
-    return Padding(
-      padding: EdgeInsets.only(top: 6, bottom: showTail ? 6 : 2),
-      child: Column(
+    // 助手气泡外侧保留 ✦ 头像（设计稿 B2：头像在气泡外，气泡内不带名字）。
+    final bubbleColumn = Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: isUser
             ? CrossAxisAlignment.end
@@ -1670,7 +1669,43 @@ class _MessageBubble extends StatelessWidget {
               ),
             ),
         ],
+    );
+
+    return Padding(
+      padding: EdgeInsets.only(top: 6, bottom: showTail ? 6 : 2),
+      child: Row(
+        mainAxisSize: MainAxisSize.max,
+        mainAxisAlignment:
+            isUser ? MainAxisAlignment.end : MainAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          if (!isUser)
+            Padding(
+              padding: const EdgeInsets.only(right: 8, top: 2),
+              child: _AssistantAvatar(),
+            ),
+          Flexible(child: bubbleColumn),
+        ],
       ),
+    );
+  }
+}
+
+/// 助手头像：气泡外侧的 ✦ 圆标（设计稿 B2：头像在气泡外，气泡内不带名字）。
+class _AssistantAvatar extends StatelessWidget {
+  const _AssistantAvatar();
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      width: 28,
+      height: 28,
+      decoration: BoxDecoration(
+        color: scheme.primaryContainer,
+        shape: BoxShape.circle,
+      ),
+      child: Icon(Icons.auto_awesome, size: 15, color: scheme.primary),
     );
   }
 }
