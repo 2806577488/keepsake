@@ -159,7 +159,11 @@ class _ProviderTile extends ConsumerWidget {
           ),
           IconButton(
             tooltip: '删除平台',
-            icon: const Icon(Icons.delete_outline),
+            // 删除类动作一律用 error 色（设计稿 §3）。
+            icon: Icon(
+              Icons.delete_outline,
+              color: Theme.of(context).colorScheme.error,
+            ),
             onPressed: () => _confirmRemove(context, ref),
           ),
         ],

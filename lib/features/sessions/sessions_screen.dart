@@ -549,7 +549,7 @@ class _SessionsScreenState extends ConsumerState<SessionsScreen> {
                 overflow: TextOverflow.ellipsis,
               ),
               subtitle: Text(
-                '${_relativeTime(session.updatedAt)} · ${session.messageCount} 个对话',
+                _sessionSubtitle(session.updatedAt, session.messageCount),
               ),
             ),
             const Divider(height: 1),
@@ -612,17 +612,27 @@ class _SessionsScreenState extends ConsumerState<SessionsScreen> {
   // 时间
   // -------------------------------------------------------------------------
 
-  /// 相对时间（ui-strings §1 原文：`刚刚` / ` 分钟前` / ` 小时前` / ` 天前`）。
-  String _relativeTime(DateTime updatedAt) {
+  /// 会话行副标题（设计稿 A1：`N 轮 · 今天 10:41`）。
+  ///
+  /// 轮数按消息条数折半估算（一问一答算一轮，至少 1 轮）：列表只拿到条数，
+  /// 为了精确轮数再查一次库不划算；时间用 [ _clockLabel ] 的「今天/昨天 HH:mm」。
+  String _sessionSubtitle(DateTime updatedAt, int messageCount) {
+    final rounds = (messageCount / 2).ceil();
+    return '${rounds < 1 ? 1 : rounds} 轮 · ${_clockLabel(updatedAt)}';
+  }
+
+  /// 今天/昨天 HH:mm，更早给「M月d日」。
+  String _clockLabel(DateTime time) {
+    final local = time.toLocal();
     final now = DateTime.now();
-    final time = updatedAt.isUtc ? updatedAt.toLocal() : updatedAt;
-    final diff = now.difference(time);
-    if (diff.isNegative || diff.inMinutes < 1) return '刚刚';
-    if (diff.inMinutes < 60) return '${diff.inMinutes} 分钟前';
-    if (diff.inHours < 24) return '${diff.inHours} 小时前';
-    if (diff.inDays < 7) return '${diff.inDays} 天前';
-    if (time.year == now.year) return '${time.month} 月 ${time.day} 日';
-    return '${time.year} 年 ${time.month} 月 ${time.day} 日';
+    final days = DateTime(now.year, now.month, now.day)
+        .difference(DateTime(local.year, local.month, local.day))
+        .inDays;
+    final hour = local.hour.toString().padLeft(2, '0');
+    final minute = local.minute.toString().padLeft(2, '0');
+    if (days <= 0) return '今天 $hour:$minute';
+    if (days == 1) return '昨天 $hour:$minute';
+    return '${local.month}月${local.day}日';
   }
 
   // -------------------------------------------------------------------------
@@ -843,7 +853,7 @@ class _SessionsScreenState extends ConsumerState<SessionsScreen> {
           style: titleStyle,
         ),
         subtitle: Text(
-          '${_relativeTime(session.updatedAt)} · ${session.messageCount} 个对话',
+          _sessionSubtitle(session.updatedAt, session.messageCount),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
         ),

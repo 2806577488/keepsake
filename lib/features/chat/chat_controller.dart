@@ -23,7 +23,7 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:drift/drift.dart' show Value;
-import 'package:flutter/foundation.dart' show immutable;
+import 'package:flutter/foundation.dart' show immutable, debugPrint;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
 
@@ -2232,21 +2232,58 @@ class ChatController extends Notifier<ChatUiState> {
     return result;
   }
 
-  /// 统一错误文案（`ApiError.message` 优先，去掉 Dart 的 `Exception: ` 前缀）。
+  /// 统一错误文案（`ApiError.message` 优先，其余异常映射成中文短句）。
+  ///
+  /// 设计稿 B5 的硬验收：错误条**不许直接显示英文异常原文**。
+  /// 原文只进 debugPrint 日志，用户看到的是可执行的短句 + 重试按钮。
   String _errorMessageOf(Object error) {
     if (error is ApiError) {
       final message = error.message.trim();
       return message.isEmpty ? kConnectionLostMessage : message;
     }
-    final text = error.toString().trim();
-    if (text.isEmpty) return '网络错误，请检查网络后重试';
-    if (text.startsWith('StateError: ')) {
-      return text.substring('StateError: '.length);
+    final raw = error.toString().trim();
+    if (raw.isEmpty) return '出现错误，请稍后重试';
+    debugPrint('[keepsake] 原始错误：$raw');
+    final text = raw.startsWith('Exception: ')
+        ? raw.substring('Exception: '.length)
+        : raw.startsWith('StateError: ')
+        ? raw.substring('StateError: '.length)
+        : raw;
+    final lower = text.toLowerCase();
+    if (lower.contains('device or resource busy') ||
+        lower.contains('file is being used') ||
+        lower.contains('being used by another process')) {
+      return '本地文件被占用（可能正被其它应用读写），稍后重试';
     }
-    if (text.startsWith('Exception: ')) {
-      return text.substring('Exception: '.length);
+    if (lower.contains('socketexception') ||
+        lower.contains('connection refused') ||
+        lower.contains('network is unreachable') ||
+        lower.contains('failed host lookup') ||
+        lower.contains('clientexception') ||
+        lower.contains('connection closed') ||
+        lower.contains('connection reset')) {
+      return '网络连接失败，检查网络后重试';
     }
-    return text;
+    if (lower.contains('timeout') || lower.contains('timed out')) {
+      return '请求超时，稍后重试';
+    }
+    if (lower.contains('handshake') || lower.contains('certificate')) {
+      return '安全连接失败（证书校验未通过）';
+    }
+    if (lower.contains('filesystemexception') || lower.contains('errno')) {
+      return '读写本地文件失败（存储空间或权限问题）';
+    }
+    if (lower.contains('permission') || lower.contains('denied')) {
+      return '没有权限，去系统设置里允许后再试';
+    }
+    if (lower.contains('outofmemory')) {
+      return '内存不足，关掉一些应用再试';
+    }
+    if (lower.contains('abort') || lower.contains('cancel')) {
+      return '已中断';
+    }
+    // 兜底：绝不把英文原文直接抛给用户（需要原文时看 debugPrint）。
+    return '出现错误，请重试';
   }
 }
 

@@ -22,11 +22,7 @@ import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:image_picker_android/image_picker_android.dart';
-import 'package:image_picker_platform_interface/image_picker_platform_interface.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:flutter/foundation.dart'
-    show TargetPlatform, defaultTargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -34,6 +30,7 @@ import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/chat/attachments.dart' show AttachmentRules;
+import '../../core/chat/gallery_picker.dart';
 import '../../core/chat/image_util.dart' show imageSizeOf;
 import '../../core/providers.dart';
 import '../../core/theme.dart' show KeepsakeSchemeX;
@@ -450,40 +447,20 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     }
   }
 
-  /// Android 13–15 的 image_picker 默认走 ACTION_GET_CONTENT，界面就是系统文件管理器；
-  /// 打开 Photo Picker 开关后才会调起真正的系统图库（相簿/缩略图那个界面）。
-  bool _useSystemPhotoPicker() {
-    if (defaultTargetPlatform != TargetPlatform.android) return false;
-    final platform = ImagePickerPlatform.instance;
-    if (platform is! ImagePickerAndroid) return false;
-    platform.useAndroidPhotoPicker = true;
-    return true;
-  }
-
+  /// 直接用系统图库（原生 `keepsake/gallery` 通道）。
+  ///
+  /// 不走 image_picker：华为等没有 AOSP Photo Picker 的设备上，它会回退到
+  /// 文件管理器（DocumentsUI 的「最近」）。原生侧先试 ACTION_PICK_IMAGES，
+  /// 解析不到再退 ACTION_PICK，两条都能直接打开图库；返回的已经是本地缓存路径。
   Future<void> _pickImages() async {
-    // 系统图库（Photo Picker）本身不需要照片/存储权限；只有回退到文件选择器时才需要。
-    final photoPicker = _useSystemPhotoPicker();
-    if (!photoPicker && !await _ensureGalleryPermission()) return;
     try {
-      final List<XFile> picked = await ImagePicker().pickMultiImage(
-        imageQuality: 92,
-      );
-      for (final XFile file in picked) {
-        await _addXFile(file);
+      final List<String> paths = await GalleryPicker.pickImages();
+      for (final String path in paths) {
+        await _addXFile(XFile(path));
       }
-    } catch (error) {
-      _toast('选择图片失败：$error');
+    } on PlatformException catch (error) {
+      _toast('打开图库失败：${error.message ?? error.code}');
     }
-  }
-
-  /// Android 13+ 用照片权限，旧系统回退到存储权限。
-  Future<bool> _ensureGalleryPermission() async {
-    final photos = await Permission.photos.request();
-    if (photos.isGranted || photos.isLimited) return true;
-    final storage = await Permission.storage.request();
-    if (storage.isGranted) return true;
-    _toast('没有相册权限：去系统设置里允许「照片和视频」后再试');
-    return false;
   }
 
   Future<void> _addXFile(XFile file) async {
@@ -1152,7 +1129,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
             contextKeepRounds: state.contextKeepRounds,
             supportsSearch: supportsSearch,
             supportsThinking: supportsThinking,
-            canAttach: state.canAttach,
             onToggleSearch: () =>
                 unawaited(_controller.setSearchEnabled(!state.searchEnabled)),
             onToggleThinking: () => unawaited(
@@ -1160,7 +1136,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
             ),
             onEditThinkingLevel: () => unawaited(_editThinkingLevel()),
             onEditContextBudget: () => unawaited(_editContextBudget()),
-            onPickFiles: () => unawaited(_showAttachMenu()),
           ),
           _InputBar(
             controller: _input,
@@ -2485,12 +2460,10 @@ class _ComposerTools extends StatelessWidget {
     required this.contextKeepRounds,
     required this.supportsSearch,
     required this.supportsThinking,
-    required this.canAttach,
     required this.onToggleSearch,
     required this.onToggleThinking,
     required this.onEditThinkingLevel,
     required this.onEditContextBudget,
-    required this.onPickFiles,
   });
 
   final bool searchEnabled;
@@ -2499,16 +2472,13 @@ class _ComposerTools extends StatelessWidget {
   final int contextKeepRounds;
   final bool supportsSearch;
   final bool supportsThinking;
-  final bool canAttach;
   final VoidCallback onToggleSearch;
   final VoidCallback onToggleThinking;
   final VoidCallback onEditThinkingLevel;
   final VoidCallback onEditContextBudget;
-  final VoidCallback onPickFiles;
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     return SizedBox(
       // 芯片行 44（原 36）：触达下限要求所有可点区域 ≥ 44。
       height: 44,
@@ -2548,21 +2518,6 @@ class _ComposerTools extends StatelessWidget {
             onTap: onEditContextBudget,
             tooltip: '超出窗口的部分压成 ≤600 字摘要',
           ),
-          _ToolChip(
-            label: '添加附件',
-            icon: canAttach
-                ? Icons.attach_file_rounded
-                : Icons.attach_file_rounded,
-            selected: false,
-            disabled: false,
-            onTap: onPickFiles,
-            tooltip: canAttach
-                ? '添加附件'
-                : ' 暂不支持附件（只有 DeepSeek 的 Files API 支持），请改成发文字',
-            tint: canAttach
-                ? null
-                : theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
-          ),
         ],
       ),
     );
@@ -2579,7 +2534,6 @@ class _ToolChip extends StatelessWidget {
     this.onLongPress,
     this.disabled = false,
     this.tooltip,
-    this.tint,
   });
 
   final String label;
@@ -2589,19 +2543,16 @@ class _ToolChip extends StatelessWidget {
   final VoidCallback? onLongPress;
   final bool disabled;
   final String? tooltip;
-  final Color? tint;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    final foreground =
-        tint ??
-        (disabled
-            ? scheme.onSurfaceVariant.withValues(alpha: 0.5)
-            : selected
-            ? scheme.onPrimaryContainer
-            : scheme.onSurfaceVariant);
+    final foreground = disabled
+        ? scheme.onSurfaceVariant.withValues(alpha: 0.5)
+        : selected
+        ? scheme.onPrimaryContainer
+        : scheme.onSurfaceVariant;
     final background = selected
         ? scheme.primaryContainer
         : scheme.surfaceContainerLow;

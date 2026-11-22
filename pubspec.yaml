@@ -4,7 +4,7 @@ publish_to: 'none'
 
 # 版本号：与应用内更新检查（lib/core/update/update_service.dart）比较的基准，
 # 必须与发布 tag（v0.4.14）一致；CI 用 flutter build 自动写入 versionName / versionCode。
-version: 0.4.15+4150
+version: 0.4.16+4160
 
 environment:
   sdk: ^3.14.0
