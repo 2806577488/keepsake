@@ -882,6 +882,12 @@ class _UpdateTileState extends State<_UpdateTile> {
   /// 已确认可用的新版本；为空表示没有更新。
   UpdateInfo? _pending;
 
+  /// 已经下载好、等用户去系统设置里开「允许安装」的包。
+  ///
+  /// 用户点「去授权」跳到系统设置，回来时如果什么都不记得，只能重新点
+  /// 「下载并安装」从头下一遍。这里把路径留着，回来点「继续安装」直接装。
+  String? _pendingApk;
+
   bool _checking = false;
 
   @override
@@ -1051,10 +1057,15 @@ class _UpdateTileState extends State<_UpdateTile> {
               style: FilledButton.styleFrom(
                 minimumSize: const Size(64, KeepsakeTheme.sheetButtonHeight),
               ),
-              onPressed: info.apkUrl == null
+              onPressed: _pendingApk != null
+                  ? () {
+                      Navigator.of(dialogContext).pop(false);
+                      _installPending();
+                    }
+                  : info.apkUrl == null
                   ? null
                   : () => Navigator.of(dialogContext).pop(true),
-              child: const Text('下载并安装'),
+              child: Text(_pendingApk != null ? '继续安装' : '下载并安装'),
             ),
           ],
         );
@@ -1124,6 +1135,7 @@ class _UpdateTileState extends State<_UpdateTile> {
       navigator.pop();
     }
 
+    var downloadedPath = '';
     try {
       // 优先差分补丁：UpdateService.update 内部在补丁不可用/合并失败时
       // 自动回退到完整包下载，所以这里只按「一条链路」写 UI 就行。
@@ -1145,12 +1157,18 @@ class _UpdateTileState extends State<_UpdateTile> {
           }
         },
       );
+      downloadedPath = file.path;
       status.value = '下载完成，正在打开安装器…';
       closeProgress();
       await UpdateService.installApk(file.path);
       if (mounted) _toast('已打开系统安装器，按提示完成安装');
     } on NeedInstallPermission catch (error) {
       closeProgress();
+      // 包已经下好了，记下路径：用户去系统设置开完权限回来，点「继续安装」
+      // 直接装，不用重新下载。
+      if (mounted && downloadedPath.isNotEmpty) {
+        setState(() => _pendingApk = downloadedPath);
+      }
       // H4：安装被拦时不再只 toast 一句 —— 按厂商讲清关在哪，再给两个出口。
       final String? action = await _showInstallBlockedDialog(error.message);
       if (action == 'settings') {
@@ -1168,6 +1186,35 @@ class _UpdateTileState extends State<_UpdateTile> {
       // 退场动画期间 ValueListenableBuilder 仍挂着监听，这里不 dispose（交给 GC），
       // 与上面 TextEditingController 的处理保持一致。
       closeProgress();
+    }
+  }
+
+  /// 安装已经下载好的包：不再下载，直接拉起安装器。
+  ///
+  /// 权限仍被系统拦住时继续走「去设置」对话框；安装器一打开就清掉待装路径，
+  /// 避免下次检查更新时误显示「继续安装」。
+  Future<void> _installPending() async {
+    final path = _pendingApk;
+    if (path == null) return;
+    try {
+      await UpdateService.installApk(path);
+      if (mounted) {
+        setState(() => _pendingApk = null);
+        _toast('已打开系统安装器，按提示完成安装');
+      }
+    } on NeedInstallPermission catch (error) {
+      final String? action = await _showInstallBlockedDialog(error.message);
+      if (action == 'settings') {
+        await UpdateService.openInstallSettings();
+      } else if (action == 'browser') {
+        await _openInBrowser(error.manualUrl ?? UpdateService.manualUrl);
+      }
+    } on UpdateException catch (error) {
+      if (mounted) setState(() => _pendingApk = null);
+      await _showFailureDialog(error.message, manualUrl: error.manualUrl);
+    } catch (error) {
+      if (mounted) setState(() => _pendingApk = null);
+      await _showFailureDialog('安装失败：$error');
     }
   }
 
