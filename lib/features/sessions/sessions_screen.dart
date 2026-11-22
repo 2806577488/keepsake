@@ -21,6 +21,8 @@
 /// - FAB：「新对话」（先 `createSession` 再进 `ChatScreen`）。
 library;
 
+import 'dart:async';
+
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -36,6 +38,7 @@ import 'package:keepsake/core/providers.dart';
 import 'package:keepsake/core/theme.dart';
 import 'package:keepsake/core/usage/usage_store.dart';
 import 'package:keepsake/features/chat/chat_screen.dart';
+import 'package:keepsake/features/sessions/delete_task.dart';
 import 'package:keepsake/features/sessions/sessions_providers.dart';
 import 'package:keepsake/features/settings/settings_screen.dart';
 
@@ -59,6 +62,12 @@ class _SessionsScreenState extends ConsumerState<SessionsScreen> {
 
   /// 选中的会话 id（退出选择态时清空）。
   final Set<String> _selectedIds = <String>{};
+
+  /// 已确认删除、但后台任务还没删完的会话 id。
+  ///
+  /// 用于「乐观删除」：确认后列表里立刻消失，不等数据库删完
+  /// （v3.1 §2.2 要求「被删除的会话从列表移除，不等后台完成」）。
+  final Set<String> _pendingDeleteIds = <String>{};
 
   /// 选区导出中（防止重复点「导出」）。
   bool _exporting = false;
@@ -330,7 +339,11 @@ class _SessionsScreenState extends ConsumerState<SessionsScreen> {
     });
   }
 
-  /// 删除选中的会话：确认一次 → 逐条级联删除（每 8 条让出事件循环）→ 清理孤儿角色卡。
+  /// 删除选中的会话：确认一次 → **交给后台任务**（不受界面状态影响）。
+  ///
+  /// 用户点了「删除」就必须删完：他之后退出全选、离开列表、进聊天页，
+  /// 都不该中断删除。所以这里不 await 删除结果，而是启动
+  /// [deleteTaskProvider]（进度在「设置 → 后台任务」里看）。
   Future<void> _deleteSelected(List<Session> allSessions) async {
     if (_selectedIds.isEmpty) return;
     final List<String> ids = _selectedIds.toList(growable: false);
@@ -358,64 +371,30 @@ class _SessionsScreenState extends ConsumerState<SessionsScreen> {
     )) ?? false;
     if (!confirmed || !mounted) return;
 
-    final db = ref.read(databaseProvider);
+    // 角色卡 id 先收集好（后台任务里清理孤儿卡要用）。
     final Set<String> characterIds = <String>{
       for (final session in allSessions)
         if (ids.contains(session.id) &&
             (session.characterId ?? '').isNotEmpty)
           session.characterId!,
     };
-    UsageStore? store;
-    try {
-      store = await ref.read(usageStoreProvider.future);
-    } catch (_) {
-      // 用量清理失败不影响删会话。
-    }
 
-    var removed = 0;
-    var handled = 0;
-    for (final String id in ids) {
-      try {
-        await db.deleteSession(id);
-        removed++;
-      } catch (_) {
-        // 单条失败不影响其余会话。
-      }
-      try {
-        await store?.resetSession(id);
-      } catch (_) {
-        // 同上。
-      }
-      handled++;
-      if (handled % 8 == 0) {
-        // 让出事件循环：一次删几百条时界面不会卡住。
-        await Future<void>.delayed(Duration.zero);
-      }
-    }
-
-    // 孤儿角色卡：删完后没有会话再引用的就清掉（读库里的最新数据，不用列表缓存）。
-    try {
-      final List<Session> remaining = await db.allSessions();
-      final Set<String> stillUsed = <String>{
-        for (final session in remaining)
-          if ((session.characterId ?? '').isNotEmpty) session.characterId!,
-      };
-      for (final String characterId in characterIds) {
-        if (stillUsed.contains(characterId)) continue;
-        try {
-          await db.deleteCharacter(characterId);
-        } catch (_) {
-          // 角色卡清理失败不影响删会话。
-        }
-      }
-    } catch (_) {
-      // 同上。
-    }
-
-    if (!mounted) return;
-    ref.invalidate(sessionsProvider);
+    // 乐观删除：列表里立刻隐藏，再交给后台任务慢慢删。
+    setState(() => _pendingDeleteIds.addAll(ids));
+    // 确认即交给后台任务：立刻退出多选，删除在后台跑完。
     _exitSelection();
-    _toast('已删除 $removed 个会话');
+    _toast('已开始删除 $count 个会话，进度见「设置 → 后台任务」');
+    unawaited(
+      ref
+          .read(deleteTaskProvider.notifier)
+          .start(ids: ids, characterIds: characterIds.toList(growable: false))
+          .then((int removed) {
+            if (!mounted) return;
+            setState(() => _pendingDeleteIds.removeAll(ids));
+            ref.invalidate(sessionsProvider);
+            _toast('已删除 $removed 个会话');
+          }),
+    );
   }
 
   /// 「导出」：先选出口（存到手机 / 分享），再生成选中会话的 ZIP。
@@ -785,6 +764,7 @@ class _SessionsScreenState extends ConsumerState<SessionsScreen> {
         child: Column(
           children: [
             const _ImportProgressBanner(),
+            const _DeleteProgressBanner(),
             Expanded(
               child: _searching
                   ? const _SearchResults()
@@ -881,7 +861,12 @@ class _SessionsScreenState extends ConsumerState<SessionsScreen> {
         message: '$error',
         onRetry: () => ref.invalidate(sessionsProvider),
       ),
-      data: (sessions) {
+      data: (allSessions) {
+        // 乐观删除：已确认删除的会话立刻从列表隐藏，等后台任务删完。
+        final sessions = <Session>[
+          for (final session in allSessions)
+            if (!_pendingDeleteIds.contains(session.id)) session,
+        ];
         if (sessions.isEmpty) {
           return const _EmptyState();
         }
@@ -1662,6 +1647,88 @@ class _ErrorState extends StatelessWidget {
             OutlinedButton(onPressed: onRetry, child: const Text('重试')),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// 批量删除的顶部临时进度条（v3.1 §2.2）。
+///
+/// - 高 40dp 通栏、文字 `fs-sub`、2dp 进度条用 `selectionStroke`；
+/// - 「收起」后变成 28dp 的窄条，点按可展开；
+/// - 进度一旦跑完，本 banner 自动消失（设置页的后台任务入口也同步消失）。
+class _DeleteProgressBanner extends ConsumerStatefulWidget {
+  const _DeleteProgressBanner();
+
+  @override
+  ConsumerState<_DeleteProgressBanner> createState() =>
+      _DeleteProgressBannerState();
+}
+
+class _DeleteProgressBannerState extends ConsumerState<_DeleteProgressBanner> {
+  bool _collapsed = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final DeleteTaskState task = ref.watch(deleteTaskProvider);
+    if (!task.running) {
+      if (_collapsed) {
+        // 任务结束时恢复展开：下次删除直接显示进度条。
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && _collapsed) setState(() => _collapsed = false);
+        });
+      }
+      return const SizedBox.shrink();
+    }
+    final s = KeepsakeSkinColors.of(context);
+    final theme = Theme.of(context);
+    if (_collapsed) {
+      return InkWell(
+        onTap: () => setState(() => _collapsed = false),
+        child: Container(
+          height: 28,
+          alignment: Alignment.center,
+          color: s.c.low,
+          child: Text(
+            '正在删除会话 ${task.done} / ${task.total}（点按展开）',
+            style: theme.textTheme.labelSmall?.copyWith(color: s.c.onV),
+          ),
+        ),
+      );
+    }
+    return Container(
+      height: 40,
+      color: s.c.low,
+      padding: const EdgeInsets.fromLTRB(16, 0, 4, 0),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '正在删除会话  ${task.done} / ${task.total}',
+                  style: theme.textTheme.bodySmall?.copyWith(color: s.c.onV),
+                ),
+                const SizedBox(height: 3),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(1),
+                  child: LinearProgressIndicator(
+                    value: task.fraction,
+                    minHeight: 2,
+                    backgroundColor: s.c.ov,
+                    color: s.c.selBar,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          TextButton(
+            onPressed: () => setState(() => _collapsed = true),
+            child: const Text('收起'),
+          ),
+        ],
       ),
     );
   }

@@ -569,6 +569,39 @@ class AppDatabase extends _$AppDatabase {
     });
   }
 
+  /// 批量删除会话及其消息 / 附件 / 摘要（一个事务，按块规避 SQLite 变量上限）。
+  ///
+  /// 逐条调用 [deleteSession] 时每条都开一个事务（4 张表 + 级联），会话上千条
+  /// 就会慢到几十秒甚至十几分钟——用户看到的就是「点了删除按钮没反应」。
+  /// 整批放进同一个事务后，几千条也是秒级。
+  Future<void> deleteSessions(
+    Iterable<String> ids, {
+    void Function(int done, int total)? onProgress,
+  }) async {
+    final List<String> list =
+        ids.where((id) => id.isNotEmpty).toList(growable: false);
+    if (list.isEmpty) return;
+    final int total = list.length;
+    var done = 0;
+    // SQLite 默认最多 999 个绑定变量，按 400 分块留余量。
+    const int chunk = 400;
+    await transaction(() async {
+      for (var start = 0; start < list.length; start += chunk) {
+        final int end =
+            start + chunk < list.length ? start + chunk : list.length;
+        final List<String> part = list.sublist(start, end);
+        await (delete(attachments)..where((t) => t.sessionId.isIn(part))).go();
+        await (delete(messages)..where((t) => t.sessionId.isIn(part))).go();
+        await (delete(sessionSummaries)..where((t) => t.sessionId.isIn(part)))
+            .go();
+        await (delete(summaryCaches)..where((t) => t.sessionId.isIn(part))).go();
+        await (delete(sessions)..where((t) => t.id.isIn(part))).go();
+        done += part.length;
+        onProgress?.call(done, total);
+      }
+    });
+  }
+
   /// 更新 `updated_at`（可选同时改标题/消息数）。
   Future<void> touchSession(String id, {String? title, int? messageCount}) async {
     await (update(sessions)..where((t) => t.id.equals(id))).write(

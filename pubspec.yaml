@@ -4,7 +4,7 @@ publish_to: 'none'
 
 # 版本号：与应用内更新检查（lib/core/update/update_service.dart）比较的基准，
 # 必须与发布 tag（v0.4.14）一致；CI 用 flutter build 自动写入 versionName / versionCode。
-version: 0.4.22+4220
+version: 0.4.23+4230
 
 environment:
   sdk: ^3.14.0
@@ -92,6 +92,9 @@ flutter:
     - family: KeepsakeSerif
       fonts:
         - asset: assets/fonts/KeepsakeSerif-subset.otf
+        # 双字重（v3.1）：标题 700 必须用真正的 Bold，否则会用合成粗，宋体横细竖粗的对比会崩。
+        - asset: assets/fonts/KeepsakeSerif-Bold-subset.otf
+          weight: 700
     # E 纸感皮肤用宋体：本次**不打包字体**，靠系统 Songti SC / Noto Serif CJK /
     # SimSun 兜底（无宋体的机型会退回黑体）。后续打包思源宋体子集时，把字体文件
     # 放进 assets/fonts/，在此加一行 `- assets/fonts/`，并在 fonts: 里声明

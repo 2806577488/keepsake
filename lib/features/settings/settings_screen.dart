@@ -37,6 +37,7 @@ import 'package:keepsake/core/skins.dart' show Skin, keepsakeSkins, skinById;
 import 'package:keepsake/core/theme.dart' show KeepsakeSkinColors, KeepsakeTheme;
 import 'package:keepsake/core/update/update_service.dart';
 import 'package:keepsake/features/settings/export_tile.dart';
+import 'package:keepsake/features/sessions/delete_task.dart';
 import 'package:keepsake/features/settings/import_tile.dart';
 import 'package:keepsake/features/settings/characters_screen.dart';
 import 'package:keepsake/features/settings/provider_section.dart';
@@ -659,6 +660,7 @@ class _BackgroundTasksSection extends ConsumerWidget {
     final s = KeepsakeSkinColors.of(context);
     final ImportProgress? progress = ref.watch(importProgressProvider).value;
     final CardBackfillProgress backfill = ref.watch(cardBackfillProvider);
+    final DeleteTaskState deleteTask = ref.watch(deleteTaskProvider);
 
     final List<Widget> rows = <Widget>[];
     if (progress != null && (progress.running || progress.hasFailures)) {
@@ -688,6 +690,15 @@ class _BackgroundTasksSection extends ConsumerWidget {
           leading: const Icon(Icons.badge_outlined),
           title: Text(backfill.label),
           subtitle: _ProgressBar(fraction: backfill.fraction),
+        ),
+      );
+    }
+    if (deleteTask.running) {
+      rows.add(
+        ListTile(
+          leading: const Icon(Icons.delete_outline),
+          title: Text(deleteTask.label),
+          subtitle: _ProgressBar(fraction: deleteTask.fraction),
         ),
       );
     }

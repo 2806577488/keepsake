@@ -113,6 +113,47 @@ class _CharactersScreenState extends ConsumerState<CharactersScreen> {
     }
   }
 
+  /// 清掉没有任何会话的角色卡（连同它的记忆 / 情绪 / 人格）。
+  ///
+  /// 历史版本删会话时可能只删了会话、没删卡；这里给一个一次性清理入口，
+  /// 保证「会话删了 = 记忆清干净」。
+  Future<void> _cleanOrphans(List<CharacterSummary> orphans) async {
+    if (orphans.isEmpty) return;
+    final bool ok = (await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('清理孤立角色卡？'),
+        content: Text(
+          '有 ${orphans.length} 张角色卡已经没有会话了。'
+          '清理会同时删掉它们的记忆、情绪和人格，无法恢复。',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('清理'),
+          ),
+        ],
+      ),
+    )) ?? false;
+    if (!ok) return;
+    var removed = 0;
+    for (final summary in orphans) {
+      try {
+        // deleteCharacter 内部会 _brain.clearAll：记忆/情绪/人格一起清。
+        await _service.deleteCharacter(summary.card.id);
+        removed++;
+      } catch (_) {
+        // 单张失败不影响其余。
+      }
+    }
+    _toast('已清理 $removed 张孤立角色卡');
+    _refresh();
+  }
+
   Future<void> _merge(CharacterSummary from, List<CharacterSummary> all) async {
     final targets = [
       for (final other in all)
@@ -278,37 +319,59 @@ class _CharactersScreenState extends ConsumerState<CharactersScreen> {
               ),
             );
           }
-          return ListView.separated(
-            itemCount: cards.length,
-            separatorBuilder: (_, _) => const Divider(height: 1),
-            itemBuilder: (context, index) {
-              final summary = cards[index];
-              return ListTile(
-                leading: CircleAvatar(
-                  child: Text(summary.emoji, style: const TextStyle(fontSize: 20)),
+          final orphans = <CharacterSummary>[
+            for (final summary in cards)
+              if (summary.sessionCount == 0) summary,
+          ];
+          return Column(
+            children: [
+              if (orphans.isNotEmpty)
+                ListTile(
+                  leading: Icon(
+                    Icons.cleaning_services_outlined,
+                    color: theme.colorScheme.error,
+                  ),
+                  title: Text('清理 ${orphans.length} 张孤立角色卡'),
+                  subtitle: const Text('没有对话的角色卡，连同记忆一起清掉'),
+                  onTap: () => _cleanOrphans(orphans),
                 ),
-                title: Text(summary.name),
-                subtitle: Text('${summary.sessionCount} 个会话'),
-                onTap: () => _edit(summary),
-                trailing: PopupMenuButton<String>(
-                  onSelected: (value) {
-                    switch (value) {
-                      case 'edit':
-                        _edit(summary);
-                      case 'merge':
-                        _merge(summary, cards);
-                      case 'delete':
-                        _delete(summary);
-                    }
+              if (orphans.isNotEmpty) const Divider(height: 1),
+              Expanded(
+                child: ListView.separated(
+                  itemCount: cards.length,
+                  separatorBuilder: (_, _) => const Divider(height: 1),
+                  itemBuilder: (context, index) {
+                    final summary = cards[index];
+                    return ListTile(
+                      leading: CircleAvatar(
+                        child: Text(summary.emoji,
+                            style: const TextStyle(fontSize: 20)),
+                      ),
+                      title: Text(summary.name),
+                      subtitle: Text('${summary.sessionCount} 个会话'),
+                      onTap: () => _edit(summary),
+                      trailing: PopupMenuButton<String>(
+                        onSelected: (value) {
+                          switch (value) {
+                            case 'edit':
+                              _edit(summary);
+                            case 'merge':
+                              _merge(summary, cards);
+                            case 'delete':
+                              _delete(summary);
+                          }
+                        },
+                        itemBuilder: (_) => const [
+                          PopupMenuItem(value: 'edit', child: Text('编辑')),
+                          PopupMenuItem(value: 'merge', child: Text('合并到…')),
+                          PopupMenuItem(value: 'delete', child: Text('删除')),
+                        ],
+                      ),
+                    );
                   },
-                  itemBuilder: (_) => const [
-                    PopupMenuItem(value: 'edit', child: Text('编辑')),
-                    PopupMenuItem(value: 'merge', child: Text('合并到…')),
-                    PopupMenuItem(value: 'delete', child: Text('删除')),
-                  ],
                 ),
-              );
-            },
+              ),
+            ],
           );
         },
       ),

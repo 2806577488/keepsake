@@ -289,6 +289,11 @@ abstract final class KeepsakeTheme {
     }
 
     return base.copyWith(
+      // 按压反馈（v3.1 拍板）：用 onPrimaryContainer（深色）而不是
+      // primaryContainer（浅色）——浅色叠在浅底上几乎看不见。
+      // splash 12% / pressed 8%，三套皮肤各自取深色主色。
+      splashColor: c.onPC.withValues(alpha: 0.12),
+      highlightColor: c.onPC.withValues(alpha: 0.08),
       // 皮肤 token 挂在主题上，页面用 KeepsakeSkinColors.of(context) 取。
       extensions: <ThemeExtension<dynamic>>[
         KeepsakeSkinColors(skin: skin, brightness: brightness, tokens: tokens),
