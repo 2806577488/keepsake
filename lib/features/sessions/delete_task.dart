@@ -52,15 +52,10 @@ class DeleteTaskController extends Notifier<DeleteTaskState> {
       );
       removed = ids.length;
     } catch (_) {
-      // 批量失败退回逐条，尽量删掉能删的。
-      for (final String id in ids) {
-        try {
-          await db.deleteSession(id);
-          removed++;
-        } catch (_) {
-          // 单条失败不影响其余会话。
-        }
-      }
+      // 事务性：`deleteSessions` 是单事务，失败即整体回滚。绝不能退回逐条删除
+      // 「尽量删掉一部分」——那会留下半删状态（规范 v3.1 §2.3 ②「要么全删，
+      // 要么全不删」）。失败就把条数记 0，由调用方按「没删成」处理。
+      removed = 0;
     }
 
     // 用量清理逐条做（单条 update，比删会话轻得多）。

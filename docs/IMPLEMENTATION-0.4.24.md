@@ -1,4 +1,4 @@
-# Keepsake 0.4.24 工程实现说明
+# Keepsake 0.4.25 工程实现说明
 
 > 本文只陈述工程实际实现，不作验收判定。测试与设计对照请以设计包（`keepsake-design-full`）为准。
 
@@ -8,7 +8,7 @@
 
 | 项 | 值 |
 | --- | --- |
-| 版本 | `0.4.24`（versionCode 4240） |
+| 版本 | `0.4.25`（versionCode 4250） |
 | applicationId | `app.keepsake.chat` |
 | minSdk / targetSdk / compileSdk | 24 / 36 / 36 |
 | Flutter / Dart | 3.50.1 / 3.14.0（stable） |
@@ -19,8 +19,8 @@
 
 | 文件 | 大小 | SHA-256 |
 | --- | --- | --- |
-| `keepsake-0.4.24-arm64.apk` | 32,909,412 B | `1e92121018e214a27690d6ce1c2e9db83f12d78810fa11e1335d54fe51f8743c` |
-| `keepsake-0.4.24-arm.apk` | 31,385,702 B | `0aad859c4577803cd9c081f60db4df8f8f867115eaa097bc3728fb076ca8b573` |
+| `keepsake-0.4.25-arm64.apk` | 32,909,412 B | `5bace1a8dc04c446ad977d6c523608ae329e875e89f1d5fc69a2c73d2a9e84f4` |
+| `keepsake-0.4.25-arm.apk` | 31,385,702 B | `69cf68eda49ed6ce82b000725ff3563df1d8e8243a39c2bd057836c222deab9b` |
 
 ---
 
@@ -176,3 +176,4 @@ lib/
 3. **引用角标在 `selectable: true` 下的点击行为未自动化验证**：`SelectableText` 的计时器会让 widget test 挂起，只做了渲染与回调的单元验证，真机点击行为未测。
 4. **设计的 10 条断言未接入**：工程 `test/` 里目前只有 `md_bold_test.dart`。
 5. **E 皮肤字号刚变更**：`fsTitle` 16→15、`fsSub` 13→12.5 是本次按设计包校正的，尚未经过真机视觉复核。
+6. **ABI 目录混装（已修，待下一版验证）**：0.4.25 两个包在 `aapt` 里声明了三个 ABI，非目标 ABI 目录仍含插件 `.so`（`libdartjni`、`libdatastore_shared_counter`），x86_64 设备会误选导致启动崩溃。已在 `android/app/build.gradle.kts` 加 `abiFilters`（由 `ORG_GRADLE_PROJECT_keepsakeAbi` 传入），**0.4.26 起生效**。

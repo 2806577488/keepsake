@@ -49,9 +49,31 @@ android {
         // 原 APK：minSdk 24 / targetSdk 36（inventory.md §1）。
         minSdk = 24
         targetSdk = flutter.targetSdkVersion
-        // versionCode / versionName 来自 pubspec.yaml（0.4.14 / 4140）。
+        // versionCode / versionName 来自 pubspec.yaml。
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+
+        // 单 ABI 打包。build-abis.cmd 在每次 flutter build 前设置
+        // ORG_GRADLE_PROJECT_keepsakeAbi=arm64|arm，Gradle 以项目属性读到它。
+        //
+        // 为什么必须过滤：Flutter 只把引擎（libflutter/libapp/libsqlite3）放进
+        // 目标 ABI 目录，但插件的 .so（libdartjni、libdatastore_shared_counter）
+        // 会被 AGP 打进所有 ABI 目录。结果 APK 的 aapt 声明了三个 ABI，
+        // x86_64 设备看到 lib/x86_64/ 就选它，启动时缺 libflutter.so →
+        // UnsatisfiedLinkError（真机实测报告 E-01）。
+        val keepsakeAbi = (project.findProperty("keepsakeAbi") as String?)?.lowercase()
+        if (keepsakeAbi != null) {
+            ndk {
+                abiFilters.clear()
+                abiFilters.add(
+                    when (keepsakeAbi) {
+                        "arm64" -> "arm64-v8a"
+                        "arm" -> "armeabi-v7a"
+                        else -> throw GradleException("未知识别 abi：$keepsakeAbi")
+                    }
+                )
+            }
+        }
     }
 
     signingConfigs {
