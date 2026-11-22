@@ -413,6 +413,7 @@ class SkinMorph {
     required this.rRadio,
     required this.fsBar,
     required this.fsTitle,
+    required this.rowHeight,
     required this.fsBody,
     required this.fsSub,
     required this.lineHeight,
@@ -437,6 +438,10 @@ class SkinMorph {
   final double rSend;
   final double rCb;
   final double rRadio;
+
+  /// 列表行高（dp）。三套皮肤都是 68，单列成字段是为了让设计一致性
+  /// 校验脚本（check_consistency.py）能按 `rowHeight` 取到数值。
+  final double rowHeight;
 
   /// 字号（dp）：顶栏 / 列表标题 / 正文 / 元信息。
   final double fsBar;
@@ -494,6 +499,7 @@ class SkinMorph {
     rRadio: 999,
     fsBar: 20,
     fsTitle: 16,
+    rowHeight: 68,
     fsBody: 15,
     fsSub: 13,
     lineHeight: 1.6,
@@ -518,9 +524,10 @@ class SkinMorph {
     rCb: 2,
     rRadio: 999,
     fsBar: 20,
-    fsTitle: 16,
+    fsTitle: 15,
+    rowHeight: 68,
     fsBody: 16,
-    fsSub: 13,
+    fsSub: 12.5,
     lineHeight: 1.6,
     titleWeight: FontWeight.w700,
     titleLSEm: 0.01,
@@ -546,6 +553,7 @@ class SkinMorph {
     rRadio: 999,
     fsBar: 22,
     fsTitle: 16,
+    rowHeight: 68,
     fsBody: 16,
     fsSub: 13,
     lineHeight: 1.55,
