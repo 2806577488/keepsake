@@ -26,6 +26,8 @@ import 'package:highlight/languages/all.dart' show allLanguages;
 import 'package:keepsake/core/theme.dart'
     show
         KeepsakeSchemeX,
+        KeepsakeSkinColors,
+        KeepsakeTheme,
         keepsakeMarkdownExtensionSet,
         keepsakeMarkdownInlineSyntaxes,
         keepsakeMarkdownStyleSheet;
@@ -362,19 +364,20 @@ MarkdownStyleSheet _keepsakeStyleSheet(BuildContext context) {
   final theme = Theme.of(context);
   final base = keepsakeMarkdownStyleSheet(theme);
   return base.copyWith(
-    // 每个块的横向 10 = 气泡内边距；纵向只带顶部（底部留白由气泡自己补一次，
-    // 否则相邻两块的 10 会叠成 20）。代码块自己不吃这个 padding，直接贴到气泡内缘。
-    pPadding: const EdgeInsets.fromLTRB(10, 10, 10, 0),
+    // 每个块的横向 14 = 气泡内边距 12/14（README §4.3）；纵向只带顶部
+    // （底部留白由气泡自己补一次，否则相邻两块的 12 会叠成 24）。
+    // 代码块自己不吃这个 padding，直接贴到气泡内缘（通栏出血）。
+    pPadding: const EdgeInsets.fromLTRB(14, 12, 14, 0),
     p: (base.p ?? const TextStyle()).copyWith(height: 1.6),
     codeblockPadding: EdgeInsets.zero,
     codeblockDecoration: const BoxDecoration(),
     codeblockAlign: WrapAlignment.start,
     blockSpacing: 0,
     listIndent: 22,
-    blockquotePadding: const EdgeInsets.fromLTRB(12, 6, 8, 6),
-    h1Padding: const EdgeInsets.fromLTRB(10, 10, 10, 4),
-    h2Padding: const EdgeInsets.fromLTRB(10, 8, 10, 3),
-    h3Padding: const EdgeInsets.fromLTRB(10, 6, 10, 2),
+    blockquotePadding: const EdgeInsets.fromLTRB(14, 6, 10, 6),
+    h1Padding: const EdgeInsets.fromLTRB(14, 12, 14, 4),
+    h2Padding: const EdgeInsets.fromLTRB(14, 10, 14, 3),
+    h3Padding: const EdgeInsets.fromLTRB(14, 8, 14, 2),
     tableColumnWidth: const IntrinsicColumnWidth(),
   );
 }
@@ -673,6 +676,7 @@ class _CodeBlockState extends State<_CodeBlock> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    final skin = KeepsakeSkinColors.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final label = (widget.rawLanguage ?? '').trim();
     // 高亮主题：浅色 atom-one-light（这套本来就是为白底设计的）、
@@ -682,14 +686,15 @@ class _CodeBlockState extends State<_CodeBlock> {
       isDark ? atomOneDarkTheme : atomOneLightTheme,
     );
     highlightTheme['root'] = TextStyle(
-      color: scheme.onSurface,
+      color: skin.codeForeground,
       backgroundColor: Colors.transparent,
     );
-    // 12.5 号等宽、行高 1.6（设计稿代码字阶）。
-    const codeStyle = TextStyle(
-      fontFamily: 'monospace',
-      fontSize: 12.5,
-      height: 1.6,
+    // 代码字阶：13 / 行高 1.7（README §4.3）。
+    final codeStyle = TextStyle(
+      fontFamily: KeepsakeTheme.monoFontFamily,
+      fontSize: 13,
+      height: 1.7,
+      color: skin.codeForeground,
     );
 
     return Padding(
@@ -699,19 +704,18 @@ class _CodeBlockState extends State<_CodeBlock> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
-          // 头部 34 高淡青：左边语言名，右边复制键（视觉 16 / 热区 44×34）。
+          // 头部 34 高淡青（README §4.3）：左边语言名 12 号，右边复制键。
           Container(
             height: 34,
-            padding: const EdgeInsets.only(left: 12, right: 8),
-            color: scheme.codeHeader,
+            padding: const EdgeInsets.only(left: 14, right: 8),
+            color: skin.codeHeader,
             child: Row(
               children: <Widget>[
                 Expanded(
                   child: Text(
                     label.isEmpty ? '代码' : label,
                     style: TextStyle(
-                      fontSize: 11,
-                      letterSpacing: 0.6,
+                      fontSize: 12,
                       fontWeight: FontWeight.w500,
                       color: scheme.onSurfaceVariant,
                     ),
@@ -722,7 +726,8 @@ class _CodeBlockState extends State<_CodeBlock> {
                 IconButton(
                   onPressed: _copy,
                   tooltip: _copied ? '已复制' : '复制',
-                  iconSize: 16,
+                  // §6：复制代码 `Icons.copy_outlined` 18，勾 16。
+                  iconSize: _copied ? 16 : 18,
                   padding: EdgeInsets.zero,
                   constraints: const BoxConstraints.tightFor(
                     width: 44,
@@ -730,18 +735,18 @@ class _CodeBlockState extends State<_CodeBlock> {
                   ),
                   color: scheme.primary,
                   icon: Icon(
-                    _copied ? Icons.check_rounded : Icons.copy_rounded,
+                    _copied ? Icons.check : Icons.copy_outlined,
                   ),
                 ),
               ],
             ),
           ),
-          // 1px 分隔线（品牌色 12% 铺在 surface 上）。
-          Container(height: 1, color: scheme.codeDivider),
-          // 代码区：白纸 + 内边距 12，横向滚动、不换行、不裁剪。
+          // 1px 分隔线（README §1 codeDivider）。
+          Container(height: 1, color: skin.codeDivider),
+          // 代码区：白底 + 内边距 10/14，横向滚动、不换行、不裁剪。
           Container(
-            color: scheme.surface,
-            padding: const EdgeInsets.all(12),
+            color: skin.codeBackground,
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
             child: Scrollbar(
               controller: _hScroll,
               child: SingleChildScrollView(
@@ -750,7 +755,7 @@ class _CodeBlockState extends State<_CodeBlock> {
                 child: widget.language == null
                     ? Text(
                         widget.code,
-                        style: codeStyle.copyWith(color: scheme.onSurface),
+                        style: codeStyle,
                         softWrap: false,
                       )
                     : RepaintBoundary(

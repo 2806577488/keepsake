@@ -33,6 +33,7 @@ import 'package:keepsake/core/characters/card_backfill_task.dart';
 import 'package:keepsake/core/import/import_task.dart';
 import 'package:keepsake/core/providers.dart';
 import 'package:keepsake/core/settings.dart';
+import 'package:keepsake/core/skins.dart' show Skin, keepsakeSkins, skinById;
 import 'package:keepsake/core/update/update_service.dart';
 import 'package:keepsake/features/settings/export_tile.dart';
 import 'package:keepsake/features/settings/import_tile.dart';
@@ -345,6 +346,64 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 
   // -------------------------------------------------------------------------
+  // 配色方案（皮肤注册表；加皮肤只改 core/skins.dart）
+  // -------------------------------------------------------------------------
+
+  /// 配色方案选择弹层（UI 规格 v1.1 §0）。
+  ///
+  /// 列表完全由 [keepsakeSkins] 渲染：色块来自 `Skin.swatches`，名称/说明来自
+  /// `Skin.name` / `Skin.description` —— **这里没有写死三套**，新增皮肤 =
+  /// 往注册表追加一条数据。
+  Future<void> _skinPicker() async {
+    final current = skinById(ref.read(settingsProvider).skinId);
+    final picked = await showModalBottomSheet<Skin>(
+      context: context,
+      barrierColor: Colors.black.withValues(alpha: 0.5),
+      isScrollControlled: true,
+      builder: (sheetContext) {
+        final theme = Theme.of(sheetContext);
+        final scheme = theme.colorScheme;
+        return SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.only(bottom: 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                Center(
+                  child: Container(
+                    margin: const EdgeInsets.only(top: 8, bottom: 4),
+                    width: 32,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: scheme.outlineVariant,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 6, 20, 12),
+                  child: Text('配色方案', style: theme.textTheme.titleLarge),
+                ),
+                for (final skin in keepsakeSkins)
+                  _SkinRow(
+                    skin: skin,
+                    selected: skin.id == current.id,
+                    onTap: () => Navigator.of(sheetContext).pop(skin),
+                  ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+    if (picked == null || !mounted) return;
+    await ref.read(settingsProvider.notifier).setSkinId(picked.id);
+    _toast('配色方案：${picked.name}');
+  }
+
+  // -------------------------------------------------------------------------
   // 构建
   // -------------------------------------------------------------------------
 
@@ -451,6 +510,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             const _BackgroundTasksSection(),
 
             const _SectionTitle('外观'),
+            ListTile(
+              leading: const Icon(Icons.palette_outlined),
+              // 配色方案：副标题由注册表反查，未知 id 已回退第一套。
+              title: const Text('配色方案'),
+              subtitle: Text(skinById(settings.skinId).name),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: _skinPicker,
+            ),
             ListTile(
               leading: const Icon(Icons.brightness_6_outlined),
               title: const Text('主题'),
@@ -1039,6 +1106,102 @@ class _UpdateTileState extends State<_UpdateTile> {
             )
           : const Icon(Icons.chevron_right),
       onTap: _checking ? null : () => _check(silent: false),
+    );
+  }
+}
+
+/// 「外观 › 配色方案」里的一行：三个色块 + 名称 + 说明 + 选中态。
+///
+/// 数据全部来自 `core/skins.dart` 的 [keepsakeSkins]：
+/// 色块顺序 = `Skin.swatches`（用户气泡底 / 发送键 / 列表头像），
+/// 名称/说明 = `Skin.name` / `Skin.description` —— 新增皮肤不需要改这里。
+class _SkinRow extends StatelessWidget {
+  const _SkinRow({
+    required this.skin,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final Skin skin;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final swatches = skin.swatches;
+    return Material(
+      // 选中只改底色（不改变行高与内边距）。
+      color: selected ? scheme.primaryContainer : Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        child: SizedBox(
+          height: 64,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+            child: Row(
+              children: <Widget>[
+                // 色块预览：宽 56 = 3×16 + 2×4 间距。
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    for (var i = 0; i < swatches.length; i++)
+                      Container(
+                        width: 16,
+                        height: 20,
+                        margin: EdgeInsets.only(
+                          right: i == swatches.length - 1 ? 0 : 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: swatches[i],
+                          borderRadius: BorderRadius.circular(4),
+                          border: Border.all(color: scheme.outlineVariant),
+                        ),
+                      ),
+                  ],
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Text(
+                        skin.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodyLarge?.copyWith(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                          color: selected
+                              ? scheme.onPrimaryContainer
+                              : scheme.onSurface,
+                        ),
+                      ),
+                      Text(
+                        skin.description,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          fontSize: 13,
+                          color: scheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (selected)
+                  Icon(
+                    Icons.check,
+                    size: 20,
+                    color: scheme.onPrimaryContainer,
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

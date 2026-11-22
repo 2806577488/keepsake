@@ -51,14 +51,14 @@ class KeepsakeApp extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // 主题跟随设置（深浅色 / 系统）。
+    // 主题跟随设置（深浅色 / 系统）；皮肤 id 来自设置（注册表未知 id 自动回退）。
     final settings = ref.watch(settingsProvider);
 
     return MaterialApp(
       title: 'Keepsake（留声）',
       debugShowCheckedModeBanner: false,
-      theme: KeepsakeTheme.light,
-      darkTheme: KeepsakeTheme.dark,
+      theme: KeepsakeTheme.of(Brightness.light, skinId: settings.skinId),
+      darkTheme: KeepsakeTheme.of(Brightness.dark, skinId: settings.skinId),
       themeMode: settings.themeMode,
       // M5：全应用统一夹住 textScaler（TextScaler.clamp 对线性/非线性缩放都成立）。
       builder: (BuildContext context, Widget? child) {

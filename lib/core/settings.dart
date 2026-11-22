@@ -7,6 +7,9 @@
 ///
 /// 读：`ref.watch(settingsProvider)` → `Settings`（不可变）。
 /// 写：`ref.read(settingsProvider.notifier).setXxx(...)`（内部走 `SettingsStore.update`）。
+///
+/// 皮肤（UI 规格 v1.1）：只持久化 `skin_id` 字符串，具体色值全在
+/// `core/skins.dart` 的 [keepsakeSkins] 注册表里 —— 加皮肤不改这个文件。
 library;
 
 import 'dart:convert';
@@ -17,6 +20,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'api/provider_models.dart' show kDefaultModelName;
+import 'skins.dart' show kDefaultSkinId, skinById;
 
 /// 默认 system prompt（prompts.md §1 原文 [确定]）。
 const String kDefaultSystemPrompt =
@@ -97,6 +101,7 @@ class Settings {
     this.thinkingEnabled = false,
     this.searchEnabled = false,
     this.themeMode = ThemeMode.system,
+    this.skinId = kDefaultSkinId,
     this.ttsSpeed = 1.0,
     this.ttsVoice = '',
     this.memoryEnabled = true,
@@ -132,6 +137,12 @@ class Settings {
 
   /// 深浅色。
   final ThemeMode themeMode;
+
+  /// 皮肤 id（UI 规格 v1.1 三套：`a` / `e` / `h`）。
+  ///
+  /// 只存 id，不存色值：色值在 `core/skins.dart` 的注册表里，所以加皮肤不用改
+  /// 这里。未知 id（旧版本/手改坏）由 `skinById` 回退第一套，不崩。
+  final String skinId;
 
   /// TTS 语速（[推断] 0.5–2.0）。
   final double ttsSpeed;
@@ -172,6 +183,7 @@ class Settings {
     bool? thinkingEnabled,
     bool? searchEnabled,
     ThemeMode? themeMode,
+    String? skinId,
     double? ttsSpeed,
     String? ttsVoice,
     bool? memoryEnabled,
@@ -188,6 +200,7 @@ class Settings {
       thinkingEnabled: thinkingEnabled ?? this.thinkingEnabled,
       searchEnabled: searchEnabled ?? this.searchEnabled,
       themeMode: themeMode ?? this.themeMode,
+      skinId: skinId ?? this.skinId,
       ttsSpeed: ttsSpeed ?? this.ttsSpeed,
       ttsVoice: ttsVoice ?? this.ttsVoice,
       memoryEnabled: memoryEnabled ?? this.memoryEnabled,
@@ -207,6 +220,7 @@ class Settings {
     'thinking_enabled': thinkingEnabled,
     'search_enabled': searchEnabled,
     'theme': themeMode.name,
+    'skin_id': skinId,
     'tts_speed': ttsSpeed,
     'voice_id': ttsVoice,
     'memory_enabled': memoryEnabled,
@@ -234,6 +248,8 @@ class Settings {
           _bool(json, 'thinking_enabled', 'thinkingEnabled') ?? false,
       searchEnabled: _bool(json, 'search_enabled', 'searchEnabled') ?? false,
       themeMode: _themeMode(_str(json, 'theme', 'theme_mode', 'themeMode')),
+      // 皮肤 id 走注册表校验：未知 / 空值回退第一套，不抛异常。
+      skinId: skinById(_str(json, 'skin_id', 'skinId')).id,
       ttsSpeed: _double(json, 'tts_speed', 'ttsSpeed') ?? 1.0,
       ttsVoice: _str(json, 'voice_id', 'voiceId', 'tts_voice') ?? '',
       memoryEnabled: _bool(json, 'memory_enabled', 'memoryEnabled') ?? true,
@@ -258,6 +274,7 @@ class Settings {
       other.thinkingEnabled == thinkingEnabled &&
       other.searchEnabled == searchEnabled &&
       other.themeMode == themeMode &&
+      other.skinId == skinId &&
       other.ttsSpeed == ttsSpeed &&
       other.ttsVoice == ttsVoice &&
       other.memoryEnabled == memoryEnabled &&
@@ -275,6 +292,7 @@ class Settings {
     thinkingEnabled,
     searchEnabled,
     themeMode,
+    skinId,
     ttsSpeed,
     ttsVoice,
     memoryEnabled,
@@ -287,7 +305,7 @@ class Settings {
       'Settings(provider=$providerId, model=$defaultModel, '
       'rounds=$contextKeepRounds, window=$contextWindowTokens, '
       'thinking=${thinkingLevel.wireName}, search=$searchEnabled, '
-      'theme=${themeMode.name}, brain='
+      'theme=${themeMode.name}, skin=$skinId, brain='
       '${memoryEnabled ? 'm' : '-'}${moodEnabled ? 'o' : '-'}'
       '${personaEnabled ? 'p' : '-'})';
 }
@@ -360,6 +378,7 @@ class SettingsStore extends ChangeNotifier {
     bool? thinkingEnabled,
     bool? searchEnabled,
     ThemeMode? themeMode,
+    String? skinId,
     double? ttsSpeed,
     String? ttsVoice,
     bool? memoryEnabled,
@@ -376,6 +395,7 @@ class SettingsStore extends ChangeNotifier {
       thinkingEnabled: thinkingEnabled,
       searchEnabled: searchEnabled,
       themeMode: themeMode,
+      skinId: skinId,
       ttsSpeed: ttsSpeed,
       ttsVoice: ttsVoice,
       memoryEnabled: memoryEnabled,
@@ -453,6 +473,10 @@ class SettingsController extends Notifier<Settings> {
       store.patch(searchEnabled: enabled);
 
   Future<void> setThemeMode(ThemeMode mode) => store.patch(themeMode: mode);
+
+  /// 切换皮肤（UI 规格 v1.1）。传入未知 id 时回退第一套并落盘规范 id。
+  Future<void> setSkinId(String id) =>
+      store.patch(skinId: skinById(id).id);
 
   Future<void> setTtsSpeed(double speed) => store.patch(ttsSpeed: speed);
 

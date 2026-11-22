@@ -19,8 +19,6 @@ library;
 
 import 'dart:async';
 import 'dart:io';
-import 'dart:math' as math;
-
 import 'package:file_picker/file_picker.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -34,7 +32,8 @@ import '../../core/chat/attachments.dart' show AttachmentRules;
 import '../../core/chat/gallery_picker.dart';
 import '../../core/chat/image_util.dart' show imageSizeOf;
 import '../../core/providers.dart';
-import '../../core/theme.dart' show KeepsakeSchemeX;
+import '../../core/theme.dart'
+    show KeepsakeSkinColors, KeepsakeTheme;
 import '../../core/usage/usage.dart' show occupancyPercent;
 import '../../core/usage/usage_store.dart'
     show SessionUsage, usageStoreProvider;
@@ -779,49 +778,31 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     _toast(rounds <= 0 ? '上下文：不限制' : '上下文：最近 $rounds 轮');
   }
 
-  /// 思考强度选择（[_editThinkingLevel]）。
+  /// 思考强度选择（[_editThinkingLevel]，README §4.5）。
   ///
   /// 只改**当前会话**（`sessions.thinking_level` + `thinking_enabled`），
   /// 不写全局默认值；设置页里的「思考强度」才是所有会话的默认值。
+  /// 弹层：遮罩 rgba(0,0,0,.5)、顶圆 28、抓手 32×4、标题 20/600、
+  /// 选项行 64（单选位 20 圆 10、名称 16/600 宽 32、副标题 14），
+  /// 选中整行铺 primaryContainer，文字位置不变。
   Future<void> _editThinkingLevel() async {
     final currentLevel = _state.thinkingLevel;
-    final picked = await showDialog<ThinkingLevel>(
+    final picked = await showModalBottomSheet<ThinkingLevel>(
       context: context,
-      builder: (BuildContext dialogContext) {
-        return AlertDialog(
-          title: const Text('思考强度（当前会话）'),
-          contentPadding: const EdgeInsets.symmetric(vertical: 8),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: <Widget>[
-              for (final level in ThinkingLevel.values)
-                ListTile(
-                  leading: Icon(
-                    currentLevel == level
-                        ? Icons.radio_button_checked
-                        : Icons.radio_button_unchecked,
-                    color: currentLevel == level
-                        ? Theme.of(context).colorScheme.primary
-                        : Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
-                  title: Text(level.label),
-                  subtitle: Text(level.description),
-                  onTap: () => Navigator.of(dialogContext).pop(level),
-                ),
-            ],
-          ),
-          actions: <Widget>[
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(),
-              child: const Text('取消'),
-            ),
-          ],
-        );
-      },
+      // 遮罩 rgba(0,0,0,.5)（README §4.5）。
+      barrierColor: Colors.black.withValues(alpha: 0.5),
+      backgroundColor: Theme.of(context).colorScheme.surfaceContainerLow,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(
+          top: Radius.circular(KeepsakeTheme.sheetTopRadius),
+        ),
+      ),
+      builder: (BuildContext sheetContext) =>
+          _ThinkingLevelSheet(current: currentLevel),
     );
     if (picked == null) return;
     await _controller.setThinkingLevel(picked);
-    _toast('深度思考：开（${picked.label}）');
+    _toast('思考：开（${picked.label}）');
   }
 
   /// 平台/模型选择弹窗。
@@ -1102,12 +1083,14 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
+            // 双行顶栏：标题 16/600 + 模型行 12（量自设计图，比列表页 20 小一号）。
             Text(
               title,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: theme.textTheme.titleMedium?.copyWith(
                 fontWeight: FontWeight.w600,
+                color: Theme.of(context).colorScheme.onSurface,
               ),
             ),
             _ModelPick(
@@ -1281,7 +1264,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
             itemCount: listCount,
             itemScrollController: _itemScrollController,
             itemPositionsListener: _itemPositions,
-            padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+            // 页面左右内边距 16（README §3）。
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
             itemBuilder: (BuildContext context, int index) {
               if (hasEarlier && index == 0) {
                 return _EarlierMessagesButton(onTap: () => _loadEarlier(from));
@@ -1557,16 +1541,22 @@ class _MessageBubble extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    final skin = KeepsakeSkinColors.of(context);
     final isUser = message.isUser;
-    final bubbleColor = isUser
-        ? scheme.primaryContainer
-        : scheme.surfaceContainerLow;
-    final textColor = isUser ? scheme.onPrimaryContainer : scheme.onSurface;
+    // 用户气泡用皮肤 primaryContainer；助手气泡 surfaceContainerLow（README §4.3）。
+    final bubbleColor = isUser ? skin.userBubbleBg : scheme.surfaceContainerLow;
+    final textColor = isUser ? skin.userBubbleFg : scheme.onSurface;
+    // 气泡圆角：大角 18 / 贴角 4（README §3、§4.3）。
+    // 用户右下 4，助手左下 4。
     final radius = BorderRadius.only(
-      topLeft: const Radius.circular(16),
-      topRight: const Radius.circular(16),
-      bottomLeft: Radius.circular(isUser ? 16 : 4),
-      bottomRight: Radius.circular(isUser ? 4 : 16),
+      topLeft: Radius.circular(KeepsakeTheme.bubbleRadius),
+      topRight: Radius.circular(KeepsakeTheme.bubbleRadius),
+      bottomLeft: Radius.circular(
+        isUser ? KeepsakeTheme.bubbleRadius : KeepsakeTheme.bubbleTailRadius,
+      ),
+      bottomRight: Radius.circular(
+        isUser ? KeepsakeTheme.bubbleTailRadius : KeepsakeTheme.bubbleRadius,
+      ),
     );
 
     final showStreamStatus =
@@ -1601,7 +1591,8 @@ class _MessageBubble extends StatelessWidget {
           children: <Widget>[
             if (!isUser && message.thinking.trim().isNotEmpty)
               Padding(
-                padding: const EdgeInsets.fromLTRB(10, 10, 10, 0),
+                // 气泡内边距 12/14（README §4.3）。
+                padding: const EdgeInsets.fromLTRB(14, 12, 14, 0),
                 child: _ThinkingPanel(
                   thinking: message.thinking,
                   seconds: message.thinkingSeconds,
@@ -1610,20 +1601,25 @@ class _MessageBubble extends StatelessWidget {
               ),
             if (showStreamStatus)
               Padding(
-                padding: const EdgeInsets.fromLTRB(10, 10, 10, 0),
+                padding: const EdgeInsets.fromLTRB(14, 12, 14, 0),
                 child: _StreamStatus(searching: message.searchingNow),
               ),
             if (showBody)
               DefaultTextStyle.merge(
                 style: TextStyle(color: textColor),
                 child: isUser
+                    // 用户气泡 padding 12/14、字 15/1.6（README §4.3）。
                     ? Padding(
-                        padding: const EdgeInsets.fromLTRB(10, 10, 10, 0),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 12,
+                        ),
                         child: SelectableText(
                           message.plainText,
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            color: textColor,
+                          style: theme.textTheme.bodyLarge?.copyWith(
+                            fontSize: 15,
                             height: 1.6,
+                            color: textColor,
                           ),
                         ),
                       )
@@ -1632,9 +1628,9 @@ class _MessageBubble extends StatelessWidget {
             if (message.attachments.isNotEmpty)
               Padding(
                 padding: EdgeInsets.fromLTRB(
-                  10,
-                  showBody || showStreamStatus ? 8 : 10,
-                  10,
+                  14,
+                  showBody || showStreamStatus ? 8 : 12,
+                  14,
                   0,
                 ),
                 child: _MessageAttachments(
@@ -1644,7 +1640,7 @@ class _MessageBubble extends StatelessWidget {
               ),
             if (message.searchSources.isNotEmpty)
               Padding(
-                padding: const EdgeInsets.fromLTRB(10, 8, 10, 0),
+                padding: const EdgeInsets.fromLTRB(14, 8, 14, 0),
                 child: _SearchSourcesView(
                   sources: message.searchSources,
                   onOpen: (String url) => onOpenLink(url, url, ''),
@@ -1652,7 +1648,7 @@ class _MessageBubble extends StatelessWidget {
               ),
             if (message.error)
               Padding(
-                padding: const EdgeInsets.fromLTRB(10, 6, 10, 0),
+                padding: const EdgeInsets.fromLTRB(14, 6, 14, 0),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: <Widget>[
@@ -1669,7 +1665,7 @@ class _MessageBubble extends StatelessWidget {
               ),
             if (message.streaming && message.text.trim().isNotEmpty)
               Padding(
-                padding: const EdgeInsets.fromLTRB(10, 6, 10, 0),
+                padding: const EdgeInsets.fromLTRB(14, 6, 14, 0),
                 child: SizedBox(
                   width: 12,
                   height: 12,
@@ -1680,7 +1676,7 @@ class _MessageBubble extends StatelessWidget {
                 ),
               ),
             // 底部统一留白（正文块的段落只带顶部间距，避免上下叠成双倍）。
-            const SizedBox(height: 10),
+            const SizedBox(height: 12),
           ],
         ),
       ),
@@ -1695,9 +1691,8 @@ class _MessageBubble extends StatelessWidget {
         children: <Widget>[
           ConstrainedBox(
             constraints: BoxConstraints(
-              // 气泡最大宽 = min(86% 屏宽, 520)（M6）：窄屏仍是 86%，
-              // 折叠屏/平板展开态封到 520，避免一行排下 60+ 个汉字。
-              maxWidth: math.min(MediaQuery.sizeOf(context).width * 0.86, 520),
+              // 气泡最大宽 76%（README §4.3）：窄屏/折叠屏都按屏宽比例封顶。
+              maxWidth: MediaQuery.sizeOf(context).width * 0.76,
               minWidth: showStreamStatus ? 144 : 0,
             ),
             child: bubble,
@@ -1756,7 +1751,8 @@ class _MessageBubble extends StatelessWidget {
         children: <Widget>[
           if (!isUser)
             Padding(
-              padding: const EdgeInsets.only(right: 8, top: 2),
+              // 头像 28 圆 14，与气泡 gap 8（README §4.3）。
+              padding: const EdgeInsets.only(right: 8),
               child: _AssistantAvatar(),
             ),
           Flexible(child: bubbleColumn),
@@ -1766,21 +1762,21 @@ class _MessageBubble extends StatelessWidget {
   }
 }
 
-/// 助手头像：气泡外侧的 ✦ 圆标（设计稿 B2：头像在气泡外，气泡内不带名字）。
+/// 助手头像：气泡外侧的圆标（README §4.3：28×28，圆 14，与气泡 gap 8）。
 class _AssistantAvatar extends StatelessWidget {
   const _AssistantAvatar();
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final skin = KeepsakeSkinColors.of(context);
     return Container(
       width: 28,
       height: 28,
       decoration: BoxDecoration(
-        color: scheme.primaryContainer,
+        color: skin.aiAvatarBg,
         shape: BoxShape.circle,
       ),
-      child: Icon(Icons.auto_awesome, size: 15, color: scheme.primary),
+      child: Icon(Icons.auto_awesome, size: 15, color: skin.aiAvatarFg),
     );
   }
 }
@@ -1815,16 +1811,19 @@ class _AssistantBodyState extends State<_AssistantBody> {
     }
     final theme = Theme.of(context);
     if (!_expanded && text.length > _AssistantBody.plainTextThreshold) {
-      // 气泡内 padding 归零后，这里自己补回 10 的横向内边距。
+      // 气泡内 padding 归零后，这里自己补回 12/14 的内边距（README §4.3）。
       return Padding(
-        padding: const EdgeInsets.fromLTRB(10, 10, 10, 0),
+        padding: const EdgeInsets.fromLTRB(14, 12, 14, 0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
             SelectableText(
               text,
-              style: theme.textTheme.bodyMedium?.copyWith(height: 1.6),
+              style: theme.textTheme.bodyLarge?.copyWith(
+                fontSize: 15,
+                height: 1.6,
+              ),
             ),
             const SizedBox(height: 6),
             InkWell(
@@ -1908,15 +1907,15 @@ class _ThinkingPanelState extends State<_ThinkingPanel> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    final skin = KeepsakeSkinColors.of(context);
     final seconds = widget.seconds ?? 0;
+    // 文案：`思考过程 21.6s`（README §4.3），右侧「展开 / 收起」。
     final label = widget.streaming
-        ? '思考过程（进行中）'
+        ? '思考过程 进行中'
         : seconds > 0
-        ? '思考过程（${seconds.toStringAsFixed(1)}s）'
+        ? '思考过程 ${seconds.toStringAsFixed(1)}s'
         : '思考过程';
-    // 设计稿 B4：`surfaceContainerHighest @ 50%` 底 + 圆角 8；
-    // 折叠条 44 高（左 chevron、右「展开 / 收起」），展开体左侧 2px primary 竖线。
-    final background = scheme.surfaceContainerHighest.withValues(alpha: 0.5);
+    // 思考条：高 40、底 usageBar、字 12（README §4.3）。
     final expanded = _expanded;
     final radius = BorderRadius.vertical(
       top: const Radius.circular(8),
@@ -1927,19 +1926,18 @@ class _ThinkingPanelState extends State<_ThinkingPanel> {
       mainAxisSize: MainAxisSize.min,
       children: <Widget>[
         Material(
-          color: background,
+          color: skin.usageBar,
           borderRadius: radius,
           child: InkWell(
             onTap: () => setState(() => _expanded = !_expanded),
             borderRadius: radius,
-            child: ConstrainedBox(
-              // M5：折叠条用 minHeight 而不是固定 44 —— 大字体下文字变高时
-              // 容器跟着长，不会挤出黄黑溢出条。
-              constraints: const BoxConstraints(minHeight: 44),
+            child: SizedBox(
+              height: 40,
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8),
+                padding: const EdgeInsets.symmetric(horizontal: 10),
                 child: Row(
                   children: <Widget>[
+                    // 打开/收起指示三角（Material 图标，不用 Unicode 字符）。
                     Icon(
                       expanded
                           ? Icons.expand_less_rounded
@@ -1981,9 +1979,9 @@ class _ThinkingPanelState extends State<_ThinkingPanel> {
         ),
         if (expanded)
           Container(
-            padding: const EdgeInsets.all(8),
+            padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
-              color: background,
+              color: skin.usageBar,
               borderRadius: const BorderRadius.vertical(
                 bottom: Radius.circular(8),
               ),
@@ -2427,7 +2425,7 @@ IconData _iconForFileName(String fileName) {
   }
 }
 
-/// 空态（[_EmptyChat]）：「问点什么」。
+/// 空态（[_EmptyChat]）：「问点什么」（README §4.2）。
 class _EmptyChat extends StatelessWidget {
   const _EmptyChat({this.onSuggestion});
 
@@ -2449,32 +2447,31 @@ class _EmptyChat extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
-            // 设计稿 B1：大麦克风 + 「问点什么」+ 一行说明 + 3 条建议（静默列表）。
+            // mark 圆 64×64、底 surfaceContainerHighest、图标 24（README §4.2）。
             Container(
               width: 64,
               height: 64,
               decoration: BoxDecoration(
-                color: scheme.primaryContainer,
+                color: scheme.surfaceContainerHighest,
                 shape: BoxShape.circle,
               ),
               child: Icon(
                 Icons.mic_none_rounded,
-                size: 30,
-                color: scheme.onPrimaryContainer,
+                size: KeepsakeTheme.iconSize,
+                color: scheme.onSurfaceVariant,
               ),
             ),
+            // 与 mark 间距 16。
             const SizedBox(height: 16),
-            Text(
-              '问点什么',
-              style: theme.textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            const SizedBox(height: 6),
+            // 标题 20/600（README §4.2）。
+            Text('问点什么', style: theme.textTheme.titleLarge),
+            // 说明 14/onSurfaceVariant，与标题间距 4（README §4.2）。
+            const SizedBox(height: 4),
             Text(
               '打字，或按住麦克风说话',
               textAlign: TextAlign.center,
-              style: theme.textTheme.bodySmall?.copyWith(
+              style: theme.textTheme.bodyMedium?.copyWith(
+                fontSize: 14,
                 color: scheme.onSurfaceVariant,
               ),
             ),
@@ -2485,20 +2482,24 @@ class _EmptyChat extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 children: <Widget>[
                   // 建议项是静默列表（不是与输入框同形的胶囊），点击只预填、不发送。
-                  for (final suggestion in _suggestions)
+                  for (var i = 0; i < _suggestions.length; i++) ...<Widget>[
                     _SuggestionRow(
-                      text: suggestion,
+                      text: _suggestions[i],
                       onTap: onSuggestion == null
                           ? null
-                          : () => onSuggestion!(suggestion),
+                          : () => onSuggestion!(_suggestions[i]),
                     ),
+                    // 项间距 10（README §4.2）。
+                    if (i != _suggestions.length - 1)
+                      const SizedBox(height: 10),
+                  ],
                 ],
               ),
             ),
-            const SizedBox(height: 16),
+            // 导入入口提示（§4.2 未列，但这是唯一的空态引导，不能丢）。
+            const SizedBox(height: 20),
             Text(
               '从「设置 › 数据」导入 DeepSeek 导出包',
-              textAlign: TextAlign.center,
               style: theme.textTheme.labelSmall?.copyWith(
                 color: scheme.onSurfaceVariant,
               ),
@@ -2510,7 +2511,7 @@ class _EmptyChat extends StatelessWidget {
   }
 }
 
-/// 空态里的一条建议：静默列表行（左文案 + 右 chevron），点击只预填输入框。
+/// 空态里的一条建议（README §4.2）：高 52、圆 14、1px 描边、字 14、右箭头 16。
 class _SuggestionRow extends StatelessWidget {
   const _SuggestionRow({required this.text, this.onTap});
 
@@ -2523,30 +2524,35 @@ class _SuggestionRow extends StatelessWidget {
     final scheme = theme.colorScheme;
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(minHeight: 44),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-          child: Row(
-            children: <Widget>[
-              Expanded(
-                child: Text(
-                  text,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    color: scheme.onSurface,
-                  ),
+      borderRadius: BorderRadius.circular(KeepsakeTheme.cardRadius),
+      child: Container(
+        height: 52,
+        padding: const EdgeInsets.symmetric(horizontal: 14),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(KeepsakeTheme.cardRadius),
+          // 1px 描边 outlineVariant（README §4.2）。
+          border: Border.all(color: scheme.outlineVariant),
+        ),
+        child: Row(
+          children: <Widget>[
+            Expanded(
+              child: Text(
+                text,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  fontSize: 14,
+                  color: scheme.onSurface,
                 ),
               ),
-              Icon(
-                Icons.chevron_right_rounded,
-                size: 18,
-                color: scheme.onSurfaceVariant,
-              ),
-            ],
-          ),
+            ),
+            const SizedBox(width: 8),
+            Icon(
+              Icons.chevron_right_rounded,
+              size: 16,
+              color: scheme.onSurfaceVariant,
+            ),
+          ],
         ),
       ),
     );
@@ -2581,43 +2587,37 @@ class _ComposerTools extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // M5：芯片行不再固定 44 高，改由 chip 的 minHeight 决定整体高度。
-    // 横向滚动仍保留（芯片多时不会挤成两行）。
-    // L6：横屏时这一行本来就是横向可滚动，不会把输入栏顶出屏幕。
+    // 芯片行（README §4.4）：高 32、圆 16、字 13、间距 6；
+    // 文案固定带中点分隔符 —— `联网 · 开`、`思考 · 中`、`20 轮`，
+    // 不写「思考 中」（会被读成「正在思考中」）。
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
-      padding: const EdgeInsets.symmetric(horizontal: 10),
+      padding: const EdgeInsets.symmetric(horizontal: KeepsakeTheme.pagePadding),
       child: Row(
         children: <Widget>[
           _ToolChip(
             label: supportsSearch
-                ? (searchEnabled ? '联网搜索：开' : '联网搜索：关')
-                : ' 不支持联网搜索',
-            icon: Icons.travel_explore_rounded,
+                ? (searchEnabled ? '联网 · 开' : '联网 · 关')
+                : '联网 · 不支持',
             selected: supportsSearch && searchEnabled,
             disabled: !supportsSearch,
             onTap: onToggleSearch,
-            tooltip: supportsSearch ? '支持联网搜索（DeepSeek 扩展）' : ' 不支持联网搜索',
+            tooltip: supportsSearch ? '支持联网搜索（DeepSeek 扩展）' : '不支持联网搜索',
           ),
           _ToolChip(
             label: supportsThinking
                 ? (thinkingEnabled
-                      ? '深度思考：开（${thinkingLevel.label}）'
-                      : '深度思考：关')
-                : ' 不支持深度思考',
-            icon: Icons.psychology_outlined,
+                      ? '思考 · ${thinkingLevel.label}'
+                      : '思考 · 关')
+                : '思考 · 不支持',
             selected: supportsThinking && thinkingEnabled,
             disabled: !supportsThinking,
             onTap: onToggleThinking,
             onLongPress: supportsThinking ? onEditThinkingLevel : null,
-            tooltip: supportsThinking ? '支持深度思考（长按选择思考强度）' : ' 不支持深度思考',
+            tooltip: supportsThinking ? '支持深度思考（长按选择思考强度）' : '不支持深度思考',
           ),
           _ToolChip(
-            label: contextKeepRounds <= 0
-                ? '上下文：不限制'
-                : '上下文：最近 $contextKeepRounds 轮',
-            icon: Icons.straighten_rounded,
-            selected: false,
+            label: contextKeepRounds <= 0 ? '不限制' : '$contextKeepRounds 轮',
             onTap: onEditContextBudget,
             tooltip: '超出窗口的部分压成 ≤600 字摘要',
           ),
@@ -2628,22 +2628,23 @@ class _ComposerTools extends StatelessWidget {
 }
 
 /// 单个工具 chip（[_ToolChip]）。
+///
+/// 视觉 32 高 / 圆 16（README §4.4），点击区撑到 48（§3 触摸区下限）；
+/// 选中只改颜色与描边（描边用透明占位保持 1px 宽度），文字不会位移。
 class _ToolChip extends StatelessWidget {
   const _ToolChip({
     required this.label,
-    required this.icon,
-    required this.selected,
     required this.onTap,
     this.onLongPress,
+    this.selected = false,
     this.disabled = false,
     this.tooltip,
   });
 
   final String label;
-  final IconData icon;
-  final bool selected;
   final VoidCallback onTap;
   final VoidCallback? onLongPress;
+  final bool selected;
   final bool disabled;
   final String? tooltip;
 
@@ -2660,35 +2661,42 @@ class _ToolChip extends StatelessWidget {
         ? scheme.primaryContainer
         : scheme.surfaceContainerLow;
     final chip = Padding(
+      // 芯片间距 6（README §4.4）。
       padding: const EdgeInsets.only(right: 6),
       child: InkWell(
         onTap: disabled ? null : onTap,
         onLongPress: disabled ? null : onLongPress,
-        borderRadius: BorderRadius.circular(14),
-        child: Container(
-          // M5：minHeight 而不是固定 44 —— 大字体下 chip 跟着长高，不会溢出。
-          constraints: const BoxConstraints(minHeight: 44),
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-          decoration: BoxDecoration(
-            color: background,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(
-              color: selected ? scheme.selectedBorder : scheme.outlineVariant,
-            ),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: <Widget>[
-              Icon(icon, size: 13, color: foreground),
-              const SizedBox(width: 4),
-              Text(
-                label,
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: foreground,
-                  fontWeight: selected ? FontWeight.w600 : null,
+        borderRadius: BorderRadius.circular(KeepsakeTheme.chipRadius),
+        child: SizedBox(
+          // 触达高度 48（README §3），芯片本体 32（§4.4）。
+          height: 48,
+          child: Center(
+            child: Container(
+              height: KeepsakeTheme.chipHeight,
+              padding: const EdgeInsets.symmetric(horizontal: 14),
+              decoration: BoxDecoration(
+                color: background,
+                borderRadius: BorderRadius.circular(
+                  KeepsakeTheme.chipRadius,
+                ),
+                border: Border.all(
+                  width: 1,
+                  color: selected
+                      ? Colors.transparent
+                      : scheme.outlineVariant,
                 ),
               ),
-            ],
+              child: Center(
+                child: Text(
+                  label,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    fontSize: 13,
+                    color: foreground,
+                    fontWeight: selected ? FontWeight.w600 : null,
+                  ),
+                ),
+              ),
+            ),
           ),
         ),
       ),
@@ -2805,34 +2813,6 @@ class _InputBar extends StatefulWidget {
 }
 
 class _InputBarState extends State<_InputBar> {
-  bool _focused = false;
-
-  @override
-  void initState() {
-    super.initState();
-    widget.focusNode.addListener(_onFocusChanged);
-  }
-
-  @override
-  void didUpdateWidget(_InputBar oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.focusNode != widget.focusNode) {
-      oldWidget.focusNode.removeListener(_onFocusChanged);
-      widget.focusNode.addListener(_onFocusChanged);
-    }
-  }
-
-  @override
-  void dispose() {
-    widget.focusNode.removeListener(_onFocusChanged);
-    super.dispose();
-  }
-
-  void _onFocusChanged() {
-    if (!mounted) return;
-    setState(() => _focused = widget.focusNode.hasFocus);
-  }
-
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -2843,8 +2823,13 @@ class _InputBarState extends State<_InputBar> {
       top: false,
       child: Container(
         padding: widget.compact
-            ? const EdgeInsets.fromLTRB(8, 2, 8, 4)
-            : const EdgeInsets.fromLTRB(8, 4, 8, 8),
+            ? const EdgeInsets.fromLTRB(16, 2, 16, 4)
+            : const EdgeInsets.fromLTRB(
+                KeepsakeTheme.pagePadding,
+                4,
+                KeepsakeTheme.pagePadding,
+                8,
+              ),
         decoration: BoxDecoration(
           color: scheme.surface,
           border: Border(
@@ -2884,20 +2869,24 @@ class _InputBarState extends State<_InputBar> {
                       onPointerUp: widget.onPointerUp,
                       onPointerCancel: widget.onPointerCancel,
                       child: Container(
-                        // M5：语音条用 minHeight 44（触达下限）而不是固定高，
-                        // 大字体下文字能撑高容器而不溢出。
-                        constraints: const BoxConstraints(minHeight: 44),
-                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        // 语音条与输入框同高（48）同圆角（24）（README §4.4）。
+                        constraints: const BoxConstraints(
+                          minHeight: KeepsakeTheme.inputHeight,
+                        ),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
                         alignment: Alignment.center,
                         decoration: BoxDecoration(
                           color: recording
                               ? scheme.errorContainer
                               : scheme.surfaceContainerHighest,
-                          borderRadius: BorderRadius.circular(14),
+                          borderRadius: BorderRadius.circular(
+                            KeepsakeTheme.inputRadius,
+                          ),
                           border: Border.all(
+                            width: 1,
                             color: recording
                                 ? scheme.error
-                                : scheme.outlineVariant,
+                                : Colors.transparent,
                           ),
                         ),
                         child: Row(
@@ -2942,28 +2931,17 @@ class _InputBarState extends State<_InputBar> {
                       minLines: 1,
                       maxLines: widget.compact ? 3 : 6,
                       textInputAction: TextInputAction.newline,
-                      style: theme.textTheme.bodyMedium,
-                      decoration: InputDecoration(
+                      // 输入框：高 48 / 圆 24 / 底 surfaceContainerHighest / 字 15
+                      // （README §4.4；配色与圆角由主题 inputDecorationTheme 给）。
+                      style: theme.textTheme.bodyLarge,
+                      decoration: const InputDecoration(
                         hintText: '发消息…',
-                        isDense: true,
-                        filled: true,
-                        fillColor: scheme.surfaceContainerHighest,
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 14,
+                        contentPadding: EdgeInsets.symmetric(
+                          horizontal: 16,
                           vertical: 12,
                         ),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(14),
-                          borderSide: BorderSide.none,
-                        ),
-                        focusedBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(14),
-                          borderSide: BorderSide(
-                            color: _focused
-                                ? scheme.primary
-                                : scheme.outlineVariant,
-                            width: 1.2,
-                          ),
+                        constraints: BoxConstraints(
+                          minHeight: KeepsakeTheme.inputHeight,
                         ),
                       ),
                     ),
@@ -3015,34 +2993,187 @@ class _SendStopButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final skin = KeepsakeSkinColors.of(context);
+    // 发送键 44×44、圆 22（README §4.4）；底/前景来自皮肤（§0 sendButton / onSend）。
+    final bool enabled = canSend && !sending && !streaming;
+    final Color background;
+    final Color foreground;
     if (streaming) {
-      return Padding(
-        padding: const EdgeInsets.only(bottom: 2),
-        child: IconButton.filled(
-          onPressed: onStop,
-          tooltip: '停止',
-          padding: EdgeInsets.zero,
-          constraints: const BoxConstraints.tightFor(width: 44, height: 44),
-          style: IconButton.styleFrom(backgroundColor: scheme.errorContainer),
-          icon: Icon(Icons.stop_rounded, color: scheme.onErrorContainer),
-        ),
-      );
+      background = scheme.errorContainer;
+      foreground = scheme.onErrorContainer;
+    } else if (enabled) {
+      background = skin.sendBg;
+      foreground = skin.sendFg;
+    } else {
+      // 禁用态只改透明度，不改尺寸（§5 规则 1）。
+      background = skin.sendBg.withValues(alpha: 0.45);
+      foreground = skin.sendFg.withValues(alpha: 0.8);
     }
-    final enabled = canSend && !sending;
+    final VoidCallback? action = streaming
+        ? onStop
+        : (enabled ? onSend : null);
     return Padding(
       padding: const EdgeInsets.only(bottom: 2),
-      child: IconButton.filled(
-        onPressed: enabled ? onSend : null,
-        tooltip: '发送',
-        padding: EdgeInsets.zero,
-        constraints: const BoxConstraints.tightFor(width: 44, height: 44),
-        icon: sending
-            ? const SizedBox(
-                width: 16,
-                height: 16,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              )
-            : const Icon(Icons.arrow_upward_rounded),
+      child: Tooltip(
+        message: streaming ? '停止' : '发送',
+        child: SizedBox(
+          width: KeepsakeTheme.sendSize,
+          height: KeepsakeTheme.sendSize,
+          child: Material(
+            color: background,
+            // 圆 22 = 44/2（README §4.4），用 token 而不是直接写死。
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(KeepsakeTheme.sendRadius),
+            ),
+            child: InkWell(
+              onTap: action,
+              customBorder: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(KeepsakeTheme.sendRadius),
+              ),
+              child: Center(
+                child: streaming
+                    ? Icon(Icons.stop_rounded, size: 20, color: foreground)
+                    : sending
+                    ? SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: foreground,
+                        ),
+                      )
+                    // §6：发送图标 Icons.arrow_upward，20。
+                    : Icon(Icons.arrow_upward, size: 20, color: foreground),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 思考强度弹层（README §4.5）。
+///
+/// 抓手 32×4、标题 20/600（padding 20，上下 6/12）、选项行 64。
+class _ThinkingLevelSheet extends StatelessWidget {
+  const _ThinkingLevelSheet({required this.current});
+
+  final ThinkingLevel current;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return SafeArea(
+      top: false,
+      child: Padding(
+        // 弹层底部 padding 20（README §4.5）。
+        padding: const EdgeInsets.only(bottom: 20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            // 抓手：自己画 32×4、圆 2（§4.5、§6）。
+            Center(
+              child: Container(
+                margin: const EdgeInsets.only(top: 8, bottom: 4),
+                width: 32,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: scheme.outlineVariant,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 6, 20, 12),
+              child: Text('思考强度', style: theme.textTheme.titleLarge),
+            ),
+            for (final level in ThinkingLevel.values)
+              _ThinkingLevelRow(
+                level: level,
+                selected: current == level,
+                onTap: () => Navigator.of(context).pop(level),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 弹层里的一个档位行（README §4.5）：高 64、padding 10/20、gap 14。
+///
+/// 选中整行铺 primaryContainer，**只改颜色**：单选位、名称宽度、间距都不变，
+/// 所以文字不会跳。
+class _ThinkingLevelRow extends StatelessWidget {
+  const _ThinkingLevelRow({
+    required this.level,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final ThinkingLevel level;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final nameColor = selected ? scheme.onPrimaryContainer : scheme.onSurface;
+    return Material(
+      color: selected ? scheme.primaryContainer : Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        child: SizedBox(
+          height: 64,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+            child: Row(
+              children: <Widget>[
+                // 单选位 20×20 圆 10：未选 2px outline，选中实心 primary。
+                Container(
+                  width: 20,
+                  height: 20,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: selected ? scheme.primary : Colors.transparent,
+                    border: selected
+                        ? null
+                        : Border.all(color: scheme.outline, width: 2),
+                  ),
+                ),
+                const SizedBox(width: 14),
+                // 名称 16/600，固定宽 32（§4.5）。
+                SizedBox(
+                  width: 32,
+                  child: Text(
+                    level.label,
+                    style: theme.textTheme.bodyLarge?.copyWith(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                      color: nameColor,
+                    ),
+                  ),
+                ),
+                // 副标题 14/onSurfaceVariant，紧跟名称。
+                Expanded(
+                  child: Text(
+                    level.description,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      fontSize: 14,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -3135,7 +3266,8 @@ class _ArrowButton extends StatelessWidget {
     final button = Material(
       color: scheme.surfaceContainerHigh,
       shape: const CircleBorder(),
-      elevation: dense ? 0 : 2,
+      // 零阴影：README §1「阴影全部为 0」。
+      elevation: 0,
       child: InkWell(
         onTap: onPressed,
         customBorder: const CircleBorder(),

@@ -33,6 +33,7 @@ import 'package:keepsake/core/chat/blocks.dart';
 import 'package:keepsake/core/export/exporter.dart';
 import 'package:keepsake/core/import/import_task.dart';
 import 'package:keepsake/core/providers.dart';
+import 'package:keepsake/core/theme.dart';
 import 'package:keepsake/core/usage/usage_store.dart';
 import 'package:keepsake/features/chat/chat_screen.dart';
 import 'package:keepsake/features/sessions/sessions_providers.dart';
@@ -703,14 +704,20 @@ class _SessionsScreenState extends ConsumerState<SessionsScreen> {
         title: _searching
             ? _buildSearchField(theme)
             : _selecting
-            ? Text('已选 ${_selectedIds.length}')
-            : const Text('留声'),
+            // 多选顶栏「已选 N」20/600（README §4.6）。
+            ? Text(
+                '已选 ${_selectedIds.length}',
+                style: theme.textTheme.titleLarge,
+              )
+            // 列表顶栏标题 20/600（README §4.1）。
+            : Text('留声', style: theme.textTheme.titleLarge),
         actions: _searching
             ? [
                 if (_searchController.text.isNotEmpty)
                   IconButton(
                     tooltip: '清空',
-                    icon: const Icon(Icons.clear),
+                    // §6：清空用 Material 图标 24。
+                    icon: const Icon(Icons.close, size: KeepsakeTheme.iconSize),
                     onPressed: () {
                       _searchController.clear();
                       _onSearchChanged('');
@@ -723,12 +730,15 @@ class _SessionsScreenState extends ConsumerState<SessionsScreen> {
             : [
                 IconButton(
                   tooltip: '搜索',
-                  icon: const Icon(Icons.search),
+                  icon: const Icon(Icons.search, size: KeepsakeTheme.iconSize),
                   onPressed: _openSearch,
                 ),
                 IconButton(
                   tooltip: '设置',
-                  icon: const Icon(Icons.settings_outlined),
+                  icon: const Icon(
+                    Icons.settings_outlined,
+                    size: KeepsakeTheme.iconSize,
+                  ),
                   onPressed: () => Navigator.of(context).push<void>(
                     MaterialPageRoute<void>(
                       builder: (_) => const SettingsScreen(),
@@ -749,23 +759,14 @@ class _SessionsScreenState extends ConsumerState<SessionsScreen> {
           ],
         ),
       ),
+      // FAB：高 56 / 圆 16 / 1px 描边 / 无投影（README §4.1、§7）。
       floatingActionButton: _searching || _selecting
           ? null
-          : FloatingActionButton.extended(
-              onPressed: _creating ? null : _newSession,
-              icon: _creating
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.add_comment_outlined),
-              label: const Text('新对话'),
-            ),
+          : _NewSessionFab(creating: _creating, onTap: _newSession),
     );
   }
 
-  /// 选择态的 AppBar 按钮：全选/全不选、导出、删除。
+  /// 选择态的 AppBar 按钮：全选/全不选、导出、删除（README §4.6、§6）。
   List<Widget> _buildSelectionActions(List<Session> sessions) {
     final allSelected =
         sessions.isNotEmpty && _selectedIds.length == sessions.length;
@@ -773,25 +774,37 @@ class _SessionsScreenState extends ConsumerState<SessionsScreen> {
     return <Widget>[
       IconButton(
         tooltip: allSelected ? '全不选' : '全选',
-        icon: Icon(allSelected ? Icons.deselect : Icons.select_all),
+        // §6：多选全选 `Icons.select_all`，24。
+        icon: Icon(
+          allSelected ? Icons.deselect : Icons.select_all,
+          size: KeepsakeTheme.iconSize,
+        ),
         onPressed: () => _toggleSelectAll(sessions),
       ),
       IconButton(
         tooltip: '导出选中',
+        // §6：多选导出 `Icons.file_upload_outlined`，24。
         icon: _exporting
             ? const SizedBox(
                 width: 18,
                 height: 18,
                 child: CircularProgressIndicator(strokeWidth: 2),
               )
-            : const Icon(Icons.ios_share),
+            : const Icon(
+                Icons.file_upload_outlined,
+                size: KeepsakeTheme.iconSize,
+              ),
         onPressed: empty || _exporting ? null : _exportSelected,
       ),
       IconButton(
         tooltip: '删除选中',
+        // §6：多选删除 `Icons.delete_outline` 24，色 #BA1A1A（scheme.error）。
         icon: Icon(
           Icons.delete_outline,
-          color: empty ? null : Theme.of(context).colorScheme.error,
+          size: KeepsakeTheme.iconSize,
+          color: empty ? Theme.of(context).colorScheme.error.withValues(
+            alpha: 0.4,
+          ) : Theme.of(context).colorScheme.error,
         ),
         onPressed: empty ? null : () => _deleteSelected(sessions),
       ),
@@ -831,7 +844,8 @@ class _SessionsScreenState extends ConsumerState<SessionsScreen> {
         return ListView.separated(
           padding: const EdgeInsets.only(bottom: 88),
           itemCount: sessions.length,
-          separatorBuilder: (_, _) => const Divider(height: 1, indent: 72),
+          // 分割线通栏 1px（README §1 outlineVariant）；行高由 _SessionRow 固定 68。
+          separatorBuilder: (_, _) => const Divider(height: 1),
           itemBuilder: (context, index) =>
               _buildSessionTile(theme, sessions[index]),
         );
@@ -841,9 +855,6 @@ class _SessionsScreenState extends ConsumerState<SessionsScreen> {
 
   Widget _buildSessionTile(ThemeData theme, Session session) {
     final pinned = isSessionPinned(session);
-    final titleStyle = theme.textTheme.titleMedium?.copyWith(
-      fontWeight: FontWeight.w600,
-    );
     final selected = _selecting && _selectedIds.contains(session.id);
     return Dismissible(
       key: ValueKey<String>('session-${session.id}'),
@@ -862,44 +873,16 @@ class _SessionsScreenState extends ConsumerState<SessionsScreen> {
       ),
       confirmDismiss: (_) => _confirmDelete(session),
       onDismissed: (_) => _deleteSession(session),
-      child: ListTile(
+      // 行：高 68 / 左右 16 / gap 12 / 头像 34（README §4.1）；
+      // 多选态几何完全一致，复选框放在 34 槽位里（§4.6、§5）。
+      child: _SessionRow(
+        title: sessionDisplayTitle(session),
+        subtitle: _sessionSubtitle(session.updatedAt, session.messageCount),
+        pinned: pinned,
+        selecting: _selecting,
         selected: selected,
-        leading: _selecting
-            ? Checkbox(
-                value: selected,
-                onChanged: (_) => _toggleSelected(session.id),
-              )
-            : CircleAvatar(
-                backgroundColor: pinned
-                    ? theme.colorScheme.primaryContainer
-                    : theme.colorScheme.surfaceContainerHighest,
-                child: Icon(
-                  pinned ? Icons.push_pin : Icons.chat_bubble_outline,
-                  size: 20,
-                  color: pinned
-                      ? theme.colorScheme.onPrimaryContainer
-                      : theme.colorScheme.onSurfaceVariant,
-                ),
-              ),
-        title: Text(
-          sessionDisplayTitle(session),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: titleStyle,
-        ),
-        subtitle: Text(
-          _sessionSubtitle(session.updatedAt, session.messageCount),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
-        // 选择态隐藏「更多」，避免和勾选操作抢点击。
-        trailing: _selecting
-            ? null
-            : IconButton(
-                tooltip: '更多',
-                icon: const Icon(Icons.more_vert),
-                onPressed: () => _showSessionActions(session),
-              ),
+        onToggleSelected: () => _toggleSelected(session.id),
+        onMore: _selecting ? null : () => _showSessionActions(session),
         onTap: () {
           if (_selecting) {
             _toggleSelected(session.id);
@@ -927,6 +910,226 @@ class _SessionsScreenState extends ConsumerState<SessionsScreen> {
           // 长按进入选择态并选中该行（原「更多」菜单仍可从 ⋮ 打开）。
           _enterSelection(session);
         },
+      ),
+    );
+  }
+}
+
+/// 会话行（README §4.1、§4.6、§5）。
+///
+/// 普通态与多选态**几何完全一致**：行高 68、左右 16、gap 12、左侧占位 34。
+/// 多选时 34 槽位里居中放 20 的复选框（§5 规则 2），标题/副标题位置不变；
+/// 选中只改底色 + 左缘 2px 竖条（§5 规则 1），竖条用 Positioned 覆盖，
+/// 不占布局宽度，所以文字不会左右跳。
+class _SessionRow extends StatelessWidget {
+  const _SessionRow({
+    required this.title,
+    required this.subtitle,
+    required this.pinned,
+    required this.selecting,
+    required this.selected,
+    required this.onTap,
+    required this.onLongPress,
+    required this.onToggleSelected,
+    this.onMore,
+  });
+
+  final String title;
+  final String subtitle;
+  final bool pinned;
+  final bool selecting;
+  final bool selected;
+  final VoidCallback onTap;
+  final VoidCallback onLongPress;
+  final VoidCallback onToggleSelected;
+
+  /// 更多（多选态为 null，位置由 trailing 占位自然收起，不影响左侧几何）。
+  final VoidCallback? onMore;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final skin = KeepsakeSkinColors.of(context);
+    return Material(
+      color: selected ? skin.selectionBg : Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        onLongPress: onLongPress,
+        child: SizedBox(
+          // 行高 68（README §4.1、§4.6、§5 规则 3）。
+          height: KeepsakeTheme.listRowHeight,
+          child: Stack(
+            children: <Widget>[
+              // 选中竖条 2px primary（§4.6），覆盖在左内边距上。
+              if (selected)
+                Positioned(
+                  left: 0,
+                  top: 0,
+                  bottom: 0,
+                  child: Container(
+                    width: 2,
+                    color: skin.selectionBar,
+                  ),
+                ),
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: KeepsakeTheme.pagePadding,
+                ),
+                child: Row(
+                  children: <Widget>[
+                    // 34 槽位：头像 / 复选框占位一致（§5 规则 2）。
+                    SizedBox(
+                      width: KeepsakeTheme.checkboxSlot,
+                      height: KeepsakeTheme.checkboxSlot,
+                      child: selecting
+                          ? Center(
+                              child: SizedBox(
+                                width: KeepsakeTheme.checkboxSize,
+                                height: KeepsakeTheme.checkboxSize,
+                                child: Checkbox(
+                                  value: selected,
+                                  onChanged: (_) => onToggleSelected(),
+                                  materialTapTargetSize:
+                                      MaterialTapTargetSize.shrinkWrap,
+                                  visualDensity: VisualDensity.compact,
+                                ),
+                              ),
+                            )
+                          : _SessionAvatar(pinned: pinned),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          // 标题 15/600 单行省略（§4.1）。
+                          Text(
+                            title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodyLarge?.copyWith(
+                              fontWeight: FontWeight.w600,
+                              color: selected ? skin.onSelection : null,
+                            ),
+                          ),
+                          // 副标题 13，与标题间距 2（§4.1）。
+                          const SizedBox(height: 2),
+                          Text(
+                            subtitle,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              color: selected
+                                  ? skin.onSelection
+                                  : scheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (onMore != null)
+                      IconButton(
+                        tooltip: '更多',
+                        // 更多图标 18（§4.1）。
+                        iconSize: 18,
+                        icon: Icon(
+                          Icons.more_vert,
+                          color: scheme.onSurfaceVariant,
+                        ),
+                        onPressed: onMore,
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 会话行头像（34 圆 / 字 15）：置顶用 primaryContainer 底，其余用皮肤
+/// `listAvatar` 底（README §4.1 + §0）。
+class _SessionAvatar extends StatelessWidget {
+  const _SessionAvatar({required this.pinned});
+
+  final bool pinned;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final skin = KeepsakeSkinColors.of(context);
+    return Container(
+      width: KeepsakeTheme.listAvatarSize,
+      height: KeepsakeTheme.listAvatarSize,
+      decoration: BoxDecoration(
+        color: pinned ? scheme.primaryContainer : skin.listAvatarBg,
+        shape: BoxShape.circle,
+      ),
+      child: Icon(
+        pinned ? Icons.push_pin : Icons.chat_bubble_outline,
+        size: 18,
+        color: pinned ? scheme.onPrimaryContainer : skin.listAvatarFg,
+      ),
+    );
+  }
+}
+
+/// 新对话按钮（README §4.1、§7）：高 56、左右 20、圆 16、1px 描边、无投影。
+class _NewSessionFab extends StatelessWidget {
+  const _NewSessionFab({required this.creating, required this.onTap});
+
+  final bool creating;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final skin = KeepsakeSkinColors.of(context);
+    return GestureDetector(
+      onTap: creating ? null : onTap,
+      child: Container(
+        height: KeepsakeTheme.fabHeight,
+        padding: const EdgeInsets.symmetric(horizontal: 20),
+        decoration: BoxDecoration(
+          color: scheme.primaryContainer,
+          borderRadius: BorderRadius.circular(KeepsakeTheme.fabRadius),
+          // 1px 描边 #8CCDBB（皮肤可覆盖）；不能有 elevation。
+          border: Border.all(width: 1, color: skin.fabBorder),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            if (creating)
+              SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: scheme.onPrimaryContainer,
+                ),
+              )
+            else
+              Icon(
+                Icons.add,
+                size: 20,
+                color: scheme.onPrimaryContainer,
+              ),
+            const SizedBox(width: 8),
+            Text(
+              '新对话',
+              style: TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
+                color: scheme.onPrimaryContainer,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1277,25 +1480,38 @@ class _EmptyState extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
     return Center(
       child: SingleChildScrollView(
         padding: const EdgeInsets.all(32),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(
-              Icons.forum_outlined,
-              size: 64,
-              color: theme.colorScheme.outline,
+            // mark 圆 64 + 图标 24（README §4.2）。
+            Container(
+              width: 64,
+              height: 64,
+              decoration: BoxDecoration(
+                color: scheme.surfaceContainerHighest,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                Icons.forum_outlined,
+                size: KeepsakeTheme.iconSize,
+                color: scheme.onSurfaceVariant,
+              ),
             ),
             const SizedBox(height: 16),
-            Text('还没有会话', style: theme.textTheme.titleMedium),
-            const SizedBox(height: 8),
+            // 标题 20/600（README §4.2）。
+            Text('还没有会话', style: theme.textTheme.titleLarge),
+            // 说明 14（README §4.2），与标题间距 4。
+            const SizedBox(height: 4),
             Text(
               '点右下角「新对话」开始，或从设置里导入 DeepSeek 的导出包',
               textAlign: TextAlign.center,
               style: theme.textTheme.bodyMedium?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
+                fontSize: 14,
+                color: scheme.onSurfaceVariant,
               ),
             ),
             // 只保留右下角 FAB 一个「新对话」入口（空态按钮曾与 FAB 重复）。

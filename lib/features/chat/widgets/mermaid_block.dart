@@ -612,7 +612,7 @@ class _MermaidBlockState extends State<MermaidBlock> {
                   widget.code.trim(),
                   style: const TextStyle(
                     fontFamily: 'monospace',
-                    fontSize: 12.5,
+                    fontSize: 13,
                     height: 1.45,
                   ),
                 ),
@@ -716,7 +716,7 @@ class _MermaidBlockState extends State<MermaidBlock> {
                     widget.code.trim(),
                     style: const TextStyle(
                       fontFamily: 'monospace',
-                      fontSize: 12.5,
+                      fontSize: 13,
                       height: 1.45,
                     ),
                   ),
