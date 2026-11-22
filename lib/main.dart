@@ -42,6 +42,13 @@ Future<void> main() async {
 class KeepsakeApp extends ConsumerWidget {
   const KeepsakeApp({super.key});
 
+  /// 系统字体缩放的允许上限（M5）。
+  ///
+  /// 华为「超大字体」、小米「显示大小最大」会把 textScale 推到 1.5～2.0，
+  /// 聊天页的 44dp 触达容器与双行 AppBar 在这种倍数下必然溢出；
+  /// 夹到 1.3 仍尊重用户「放大」的意图，又保证布局不被压碎。
+  static const double maxTextScale = 1.3;
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     // 主题跟随设置（深浅色 / 系统）。
@@ -53,6 +60,16 @@ class KeepsakeApp extends ConsumerWidget {
       theme: KeepsakeTheme.light,
       darkTheme: KeepsakeTheme.dark,
       themeMode: settings.themeMode,
+      // M5：全应用统一夹住 textScaler（TextScaler.clamp 对线性/非线性缩放都成立）。
+      builder: (BuildContext context, Widget? child) {
+        final MediaQueryData media = MediaQuery.of(context);
+        return MediaQuery(
+          data: media.copyWith(
+            textScaler: media.textScaler.clamp(maxScaleFactor: maxTextScale),
+          ),
+          child: child ?? const SizedBox.shrink(),
+        );
+      },
       home: const SessionsScreen(),
     );
   }

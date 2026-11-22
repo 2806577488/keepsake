@@ -19,6 +19,7 @@ library;
 
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:file_picker/file_picker.dart';
 import 'package:image_picker/image_picker.dart';
@@ -433,7 +434,13 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   Future<void> _takePhoto() async {
     final status = await Permission.camera.request();
     if (!status.isGranted) {
-      _toast('没有相机权限：去系统设置里允许「相机」后再试');
+      if (status.isPermanentlyDenied) {
+        // MIUI/ColorOS 上「拒绝两次」= 永久拒绝，再点也不会弹系统框（M4）：
+        // 给「去设置」和「改为相册」两个出口，而不是只 toast 一句。
+        await _showCameraBlockedDialog();
+      } else {
+        _toast('没有相机权限：再点一次可以重新申请，或在系统设置里允许「相机」');
+      }
       return;
     }
     try {
@@ -441,25 +448,70 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         source: ImageSource.camera,
         imageQuality: 92,
       );
-      if (photo != null) await _addXFile(photo);
+      if (photo == null) {
+        // 用户取消、或被系统（省电/权限回收）打断时返回 null：提示改用相册（M4）。
+        _toast('没有拿到照片，可以改用「从相册选择」');
+        return;
+      }
+      await _addXFile(photo);
     } catch (error) {
       _toast('拍照失败：$error');
     }
   }
 
+  /// 相机权限被永久拒绝时的弹窗：去系统设置 / 改用相册。
+  Future<void> _showCameraBlockedDialog() async {
+    final bool? goSettings = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('没有相机权限'),
+        content: const Text('系统已经不再弹授权框了。去设置里允许「相机」，或者直接从相册选择图片。'),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('改为相册'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('去设置'),
+          ),
+        ],
+      ),
+    );
+    if (goSettings == null || !mounted) return;
+    if (goSettings) {
+      final opened = await openAppSettings();
+      if (!opened && mounted) {
+        _toast('打不开系统设置：手动到 设置 > 应用 > Keepsake > 权限 里允许相机');
+      }
+      return;
+    }
+    await _pickImages();
+  }
+
   /// 直接用系统图库（原生 `keepsake/gallery` 通道）。
   ///
   /// 不走 image_picker：华为等没有 AOSP Photo Picker 的设备上，它会回退到
-  /// 文件管理器（DocumentsUI 的「最近」）。原生侧先试 ACTION_PICK_IMAGES，
-  /// 解析不到再退 ACTION_PICK，两条都能直接打开图库；返回的已经是本地缓存路径。
+  /// 文件管理器（DocumentsUI 的「最近」）。原生侧的回退顺序是
+  /// `ACTION_PICK_IMAGES` → `ACTION_GET_CONTENT`（可多选）→ `ACTION_PICK`，
+  /// 打开的都是「图库」界面；返回的已经是复制到缓存的本地路径。
   Future<void> _pickImages() async {
     try {
       final List<String> paths = await GalleryPicker.pickImages();
       for (final String path in paths) {
-        await _addXFile(XFile(path));
+        try {
+          await _addXFile(XFile(path));
+        } catch (error) {
+          // 单张失败不连坐其他张：明确提示，不静默丢（M2）。
+          _toast('有一张图片读不出来：$error');
+        }
       }
     } on PlatformException catch (error) {
       _toast('打开图库失败：${error.message ?? error.code}');
+    } catch (error) {
+      // 原生返回的本地路径可能已失效（缓存被系统清掉），XFile.length() 会抛
+      // FileSystemException —— 这里必须兜住，否则就是未处理异常（M2）。
+      _toast('读取图片失败：$error');
     }
   }
 
@@ -1181,22 +1233,29 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     final from = _windowFrom(state.messages.length);
     final hasEarlier = from > 0;
     final listCount = state.messages.length - from + (hasEarlier ? 1 : 0);
-    return ScrollablePositionedList.builder(
-      itemCount: listCount,
-      itemScrollController: _itemScrollController,
-      itemPositionsListener: _itemPositions,
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-      itemBuilder: (BuildContext context, int index) {
-        if (hasEarlier && index == 0) {
-          return _EarlierMessagesButton(onTap: () => _loadEarlier(from));
-        }
-        final messageIndex = from + index - (hasEarlier ? 1 : 0);
-        final message = state.messages[messageIndex];
-        return KeyedSubtree(
-          key: ValueKey<String>(message.id),
-          child: _buildBubble(context, state, message, messageIndex),
-        );
-      },
+    // M6：大屏/折叠屏上整条消息流居中并限宽 720，
+    // 不让内容从屏幕左缘一直铺到右缘（中文一行 40 字左右的舒适阅读宽度）。
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 720),
+        child: ScrollablePositionedList.builder(
+          itemCount: listCount,
+          itemScrollController: _itemScrollController,
+          itemPositionsListener: _itemPositions,
+          padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+          itemBuilder: (BuildContext context, int index) {
+            if (hasEarlier && index == 0) {
+              return _EarlierMessagesButton(onTap: () => _loadEarlier(from));
+            }
+            final messageIndex = from + index - (hasEarlier ? 1 : 0);
+            final message = state.messages[messageIndex];
+            return KeyedSubtree(
+              key: ValueKey<String>(message.id),
+              child: _buildBubble(context, state, message, messageIndex),
+            );
+          },
+        ),
+      ),
     );
   }
 }
@@ -1596,8 +1655,9 @@ class _MessageBubble extends StatelessWidget {
         children: <Widget>[
           ConstrainedBox(
             constraints: BoxConstraints(
-              // 气泡最大宽 86% 屏宽；流式中只有一行状态时不许缩成贴纸（≥144）。
-              maxWidth: MediaQuery.sizeOf(context).width * 0.86,
+              // 气泡最大宽 = min(86% 屏宽, 520)（M6）：窄屏仍是 86%，
+              // 折叠屏/平板展开态封到 520，避免一行排下 60+ 个汉字。
+              maxWidth: math.min(MediaQuery.sizeOf(context).width * 0.86, 520),
               minWidth: showStreamStatus ? 144 : 0,
             ),
             child: bubble,
@@ -1832,8 +1892,10 @@ class _ThinkingPanelState extends State<_ThinkingPanel> {
           child: InkWell(
             onTap: () => setState(() => _expanded = !_expanded),
             borderRadius: radius,
-            child: SizedBox(
-              height: 44,
+            child: ConstrainedBox(
+              // M5：折叠条用 minHeight 而不是固定 44 —— 大字体下文字变高时
+              // 容器跟着长，不会挤出黄黑溢出条。
+              constraints: const BoxConstraints(minHeight: 44),
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 8),
                 child: Row(
@@ -2479,12 +2541,12 @@ class _ComposerTools extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      // 芯片行 44（原 36）：触达下限要求所有可点区域 ≥ 44。
-      height: 44,
-      child: ListView(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 10),
+    // M5：芯片行不再固定 44 高，改由 chip 的 minHeight 决定整体高度。
+    // 横向滚动仍保留（芯片多时不会挤成两行）。
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      padding: const EdgeInsets.symmetric(horizontal: 10),
+      child: Row(
         children: <Widget>[
           _ToolChip(
             label: supportsSearch
@@ -2563,8 +2625,9 @@ class _ToolChip extends StatelessWidget {
         onLongPress: disabled ? null : onLongPress,
         borderRadius: BorderRadius.circular(14),
         child: Container(
-          height: 44,
-          padding: const EdgeInsets.symmetric(horizontal: 14),
+          // M5：minHeight 而不是固定 44 —— 大字体下 chip 跟着长高，不会溢出。
+          constraints: const BoxConstraints(minHeight: 44),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
           decoration: BoxDecoration(
             color: background,
             borderRadius: BorderRadius.circular(14),
@@ -2761,7 +2824,10 @@ class _InputBarState extends State<_InputBar> {
                       onPointerUp: widget.onPointerUp,
                       onPointerCancel: widget.onPointerCancel,
                       child: Container(
-                        height: 44,
+                        // M5：语音条用 minHeight 44（触达下限）而不是固定高，
+                        // 大字体下文字能撑高容器而不溢出。
+                        constraints: const BoxConstraints(minHeight: 44),
+                        padding: const EdgeInsets.symmetric(vertical: 8),
                         alignment: Alignment.center,
                         decoration: BoxDecoration(
                           color: recording

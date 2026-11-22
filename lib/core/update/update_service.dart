@@ -1,12 +1,15 @@
 /// Keepsake（留声）— 应用内更新（数据源：GitHub Releases）。
 ///
 /// 链路：
-/// 1. **检查**：`GET https://api.github.com/repos/2806577488/keepsake/releases/latest`，
-///    读 `tag_name` / `body` / `assets[].browser_download_url`（挑 `.apk`），
-///    与 `package_info_plus` 报告的当前版本做语义化比较；
+/// 1. **检查**：依次尝试 [UpdateService.releaseApiUrls]（`api.github.com` →
+///    `gh-proxy.com` 镜像）的 `releases/latest`，读 `tag_name` / `body` /
+///    `assets[].browser_download_url`（挑 `.apk`），与 `package_info_plus`
+///    报告的当前版本做语义化比较；全部源都失败时抛带 `manualUrl` 的错误，
+///    让用户能「在浏览器打开」Release 页；
 /// 2. **下载**：流式写入外部存储 `updates/`（拿不到就退到临时目录），带进度回调；
 /// 3. **安装**：走 Kotlin 侧 MethodChannel `keepsake/update` 的 `installApk`
-///    （`Intent(ACTION_VIEW) + FileProvider`），安装前检查「允许安装未知来源应用」。
+///    （`Intent(ACTION_VIEW) + FileProvider`），安装前检查「允许安装未知来源应用」；
+///    被厂商安全策略拦住时按 `Build.MANUFACTURER` 给中文引导（H4）。
 ///
 /// 失败语义（显式）：所有失败都抛 [UpdateException]（消息可直接展示）；
 /// 缺少安装权限单独抛 [NeedInstallPermission]，由调用方引导去系统设置。
@@ -27,10 +30,16 @@ import 'package:path_provider/path_provider.dart';
 
 /// 更新相关的可展示错误。
 class UpdateException implements Exception {
-  const UpdateException(this.message);
+  const UpdateException(this.message, {this.manualUrl});
 
   /// 已经带好中文前缀，可直接 `_toast(error.message)`。
   final String message;
+
+  /// 可选的「手动下载」地址（Release 页）。
+  ///
+  /// 只有「自动链路确实走不通」时才带（H3：所有源都失败、H4：安装被厂商拦截），
+  /// 调用方的失败对话框据此多给一个「在浏览器打开」按钮。
+  final String? manualUrl;
 
   @override
   String toString() => message;
@@ -38,12 +47,29 @@ class UpdateException implements Exception {
 
 /// 没有「安装未知来源应用」权限：调用方应打开系统设置引导用户。
 class NeedInstallPermission implements Exception {
-  const NeedInstallPermission(this.message);
+  const NeedInstallPermission(this.message, {this.manualUrl});
 
   final String message;
 
+  /// 同 [UpdateException.manualUrl]：给「在浏览器打开下载页」兜底。
+  final String? manualUrl;
+
   @override
   String toString() => message;
+}
+
+/// 单个更新源不可用（超时/网络/403/响应异常）：换下一个源再试。
+class _EndpointFailure implements Exception {
+  const _EndpointFailure(this.reason);
+
+  final String reason;
+}
+
+/// 明确的服务端语义（如 404「还没发 Release」）：换源也没用，直接失败。
+class _DefinitiveFailure implements Exception {
+  const _DefinitiveFailure(this.message);
+
+  final String message;
 }
 
 /// Release 里挑中的 APK 附件。
@@ -106,10 +132,24 @@ abstract final class UpdateService {
   /// 仓库 slug（公开仓库，匿名读 API 即可）。
   static const String repoSlug = '2806577488/keepsake';
 
-  /// 最新 Release 接口（`Uri.parse` 不是常量构造，这里只能是 final）。
-  static final Uri latestReleaseUri = Uri.parse(
+  /// Release 页（手动下载兜底）。H3/H4 失败对话框的「在浏览器打开」都用它。
+  static const String manualUrl =
+      'https://github.com/2806577488/keepsake/releases/latest';
+
+  /// 依次尝试的更新源（H3）。
+  ///
+  /// 大陆网络下 `api.github.com` 的 DNS 污染/间歇不可达是常态，所以：
+  /// 1. 官方 API；
+  /// 2. `gh-proxy.com` 镜像（不可用时请求直接失败 → 自动跳过，不影响官方源）。
+  /// 由前到后逐个尝试，任一成功即用结果；全部失败才报错并带 [manualUrl]。
+  static const List<String> releaseApiUrls = <String>[
     'https://api.github.com/repos/2806577488/keepsake/releases/latest',
-  );
+    'https://gh-proxy.com/https://api.github.com/'
+        'repos/2806577488/keepsake/releases/latest',
+  ];
+
+  /// 最新 Release 接口（第一个源；保留给日志与测试用）。
+  static final Uri latestReleaseUri = Uri.parse(releaseApiUrls.first);
 
   /// GitHub API 强制要求 User-Agent，缺了会 403。
   static const String userAgent = 'keepsake-updater';
@@ -149,6 +189,10 @@ abstract final class UpdateService {
   /// 检查是否有新版本。
   ///
   /// [httpClient] 为空时内部创建并关闭；传入时由调用方负责关闭。
+  ///
+  /// 换源策略（H3）：按 [releaseApiUrls] 顺序尝试，单源超时/网络错误/403/响应异常
+  /// 都只算「这个源不可用」，自动换下一个；全部失败后抛带 [manualUrl] 的
+  /// [UpdateException]，调用方据此给「在浏览器打开下载页」。
   static Future<UpdateInfo> check({
     http.Client? httpClient,
     Duration timeout = defaultTimeout,
@@ -156,44 +200,79 @@ abstract final class UpdateService {
     final current = await currentVersion(refresh: true);
     final client = httpClient ?? http.Client();
     final owned = httpClient == null;
+    final failures = <String>[];
     try {
-      final response = await client
-          .get(latestReleaseUri, headers: _headers)
-          .timeout(timeout);
-
-      if (response.statusCode == 403) {
-        throw const UpdateException(
-          '检查更新失败：GitHub 接口被限流（HTTP 403），请稍后再试',
-        );
+      for (final endpoint in releaseApiUrls) {
+        try {
+          return await _fetchRelease(
+            client,
+            endpoint,
+            timeout: timeout,
+            current: current,
+          );
+        } on _DefinitiveFailure catch (error) {
+          // 服务端语义明确（如 404 还没有 Release）：换镜像也一样。
+          throw UpdateException(error.message);
+        } on _EndpointFailure catch (error) {
+          failures.add(error.reason);
+          debugPrint('更新源不可用（$endpoint）：${error.reason}，回退到下一个源');
+        }
       }
-      if (response.statusCode == 404) {
-        throw const UpdateException('检查更新失败：仓库还没有发布任何 Release');
-      }
-      if (response.statusCode != 200) {
-        throw UpdateException('检查更新失败：HTTP ${response.statusCode}');
-      }
-
-      Object? decoded;
-      try {
-        decoded = jsonDecode(utf8.decode(response.bodyBytes));
-      } catch (_) {
-        throw const UpdateException('检查更新失败：响应不是有效 JSON');
-      }
-      if (decoded is! Map) {
-        throw const UpdateException('检查更新失败：响应格式不正确');
-      }
-      return _parse(Map<String, Object?>.from(decoded), current);
-    } on UpdateException {
-      rethrow;
-    } on TimeoutException {
-      throw const UpdateException('检查更新失败：请求超时');
-    } on http.ClientException catch (error) {
-      throw UpdateException('检查更新失败：网络错误（${error.message}）');
-    } catch (error) {
-      throw UpdateException('检查更新失败：$error');
+      throw UpdateException(
+        '检查更新失败：连不上 GitHub（${failures.join('；')}）。'
+        '可以在浏览器打开下载页查看最新版本。',
+        manualUrl: manualUrl,
+      );
     } finally {
       if (owned) client.close();
     }
+  }
+
+  /// 请求单个更新源并解析成 [UpdateInfo]。
+  ///
+  /// 失败分两类：网络/限流/响应异常 → [_EndpointFailure]（可换源）；
+  /// 404 → [_DefinitiveFailure]（换源无意义）。
+  static Future<UpdateInfo> _fetchRelease(
+    http.Client client,
+    String endpoint, {
+    required Duration timeout,
+    required String current,
+  }) async {
+    final http.Response response;
+    try {
+      response = await client
+          .get(Uri.parse(endpoint), headers: _headers)
+          .timeout(timeout);
+    } on TimeoutException {
+      throw const _EndpointFailure('请求超时');
+    } on http.ClientException catch (error) {
+      throw _EndpointFailure('网络错误（${error.message}）');
+    } catch (error) {
+      throw _EndpointFailure('$error');
+    }
+
+    if (response.statusCode == 404) {
+      throw const _DefinitiveFailure('检查更新失败：仓库还没有发布任何 Release');
+    }
+    if (response.statusCode == 403) {
+      // GitHub 对匿名请求限流（60 次/小时）在国内 IP 上很常见；镜像可能仍是通的。
+      throw const _EndpointFailure('接口被限流（HTTP 403）');
+    }
+    if (response.statusCode != 200) {
+      throw _EndpointFailure('HTTP ${response.statusCode}');
+    }
+
+    Object? decoded;
+    try {
+      decoded = jsonDecode(utf8.decode(response.bodyBytes));
+    } catch (error) {
+      // 镜像返回 HTML 错误页时会走到这里，属于「这个源坏了」而不是「没有更新」。
+      throw const _EndpointFailure('响应不是有效 JSON');
+    }
+    if (decoded is! Map) {
+      throw const _EndpointFailure('响应格式不正确');
+    }
+    return _parse(Map<String, Object?>.from(decoded), current);
   }
 
   /// 语义化比较：`latest` 比 `base` 新时返回 true（忽略 v 前缀与非数字后缀）。
@@ -315,26 +394,81 @@ abstract final class UpdateService {
   /// 调用系统安装器打开 [path]。
   ///
   /// 会先确认文件存在、再确认安装权限；缺权限抛 [NeedInstallPermission]。
+  /// 安装器被厂商安全策略拦住（H4）时，抛带厂商中文引导与 [manualUrl] 的
+  /// [UpdateException]/[NeedInstallPermission]，调用方给「去设置」和「在浏览器打开」。
   static Future<void> installApk(String path) async {
     if (!Platform.isAndroid) {
       throw const UpdateException('只有 Android 支持应用内安装');
     }
     final file = File(path);
     if (!await file.exists()) {
-      throw UpdateException('安装失败：安装包不存在（$path）');
+      throw UpdateException(
+        '安装失败：安装包不存在（$path）',
+        manualUrl: manualUrl,
+      );
     }
     if (!await canInstallPackages()) {
-      throw const NeedInstallPermission('安装失败：还没有允许「安装未知来源应用」');
+      final hint = await installBlockedHint();
+      throw NeedInstallPermission(
+        '安装失败：还没有允许「安装未知来源应用」。$hint',
+        manualUrl: manualUrl,
+      );
     }
     try {
       await _channel.invokeMethod<void>('installApk', <String, Object?>{
         'path': file.absolute.path,
       });
     } on MissingPluginException {
-      throw const UpdateException('安装失败：原生通道不可用');
+      throw const UpdateException('安装失败：原生通道不可用', manualUrl: manualUrl);
     } on PlatformException catch (error) {
-      throw UpdateException('打开安装器失败：${error.message ?? error.code}');
+      final hint = await installBlockedHint();
+      // INSTALL_FAILED：安装器打不开/被安全策略拦；NEED_PERMISSION：授权在拉起后被收回。
+      throw UpdateException(
+        '安装失败：${error.message ?? error.code}。$hint',
+        manualUrl: manualUrl,
+      );
     }
+  }
+
+  /// 设备厂商（`Build.MANUFACTURER`，小写）；原生通道不可用时返回空串。
+  ///
+  /// 没有 `device_info_plus` 依赖，所以走已有的 `keepsake/update` 通道
+  /// 里新增的 `deviceManufacturer` 方法（见 MainActivity.kt）。
+  static Future<String> deviceManufacturer() async {
+    if (!Platform.isAndroid) return '';
+    try {
+      final value = await _channel.invokeMethod<String>('deviceManufacturer');
+      return (value ?? '').trim().toLowerCase();
+    } on MissingPluginException {
+      return '';
+    } on PlatformException {
+      return '';
+    }
+  }
+
+  /// H4：安装被拦时的厂商中文引导（一句一条，可直接拼进错误消息）。
+  ///
+  /// 依据 `Build.MANUFACTURER`：华为/荣耀、小米/Redmi、OPPO/vivo/一加/realme，
+  /// 其余走通用文案。只给「去哪关什么」，不假装能替用户关掉。
+  static Future<String> installBlockedHint() async {
+    final vendor = await deviceManufacturer();
+    if (vendor.contains('huawei') || vendor.contains('honor')) {
+      return '华为/荣耀：去 设置 > 系统和更新 > 纯净模式，关闭「增强防护」后重试。';
+    }
+    if (vendor.contains('xiaomi') ||
+        vendor.contains('redmi') ||
+        vendor.contains('poco')) {
+      return '小米/Redmi：在应用设置里关闭「安装应用时自动扫描 / 联网校验」，'
+          '必要时断网安装。';
+    }
+    if (vendor.contains('oppo') ||
+        vendor.contains('vivo') ||
+        vendor.contains('realme') ||
+        vendor.contains('oneplus')) {
+      return 'OPPO/vivo：安全检测提示里选「继续安装」（可能要勾选「已了解风险」）。';
+    }
+    return '若系统提示「来源不可信 / 安全检测」，到设置里允许本应用安装未知应用，'
+        '或改用浏览器下载安装。';
   }
 
   // ---------------------------------------------------------------------------

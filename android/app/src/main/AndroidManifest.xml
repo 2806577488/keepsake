@@ -5,12 +5,33 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
     <uses-permission android:name="android.permission.CAMERA"/>
-    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES"/>
+    <!-- M9：不再声明 READ_MEDIA_IMAGES。图库通道发的是 ACTION_PICK_IMAGES /
+         ACTION_GET_CONTENT / ACTION_PICK，返回带授权的 content:// 后立刻复制到
+         cacheDir，全程不做 MediaStore 列表查询，因此不需要读媒体权限；
+         留着它只会在部分 ROM 的「隐私」页多出一个「照片」项，让用户以为在偷读相册。
+         将来若要做自带相册网格（真的查 MediaStore），必须同时声明
+         READ_MEDIA_IMAGES + READ_MEDIA_VIDEO + READ_MEDIA_VISUAL_USER_SELECTED
+         三条并处理 Android 14 的「部分照片访问」。 -->
+    <!-- Android 12 及以下（API ≤ 32）用旧的分区存储权限；image_picker 拍完照
+         写缓存时在个别 ROM 上仍会查这一条，保留但封顶到 32。 -->
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32"/>
     <!-- 应用内更新：允许拉起系统安装器安装下载好的 APK（Android 8.0+ 还需用户手动授权）。 -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
+    <!-- L3：通知权限（Android 13+ 运行时申请）。M1 只做到「明示可续跑」，
+         这一条为将来接前台服务/进度通知预留；现在声明不会弹任何系统框
+         （未运行时申请 = 不打扰）。 -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <!-- M1：唤醒锁权限。当前代码没有 PARTIAL_WAKE_LOCK 调用，只是为将来
+         后台任务加 wakelock_plus / 前台服务铺路，不新增依赖也不影响耗电。 -->
+    <uses-permission android:name="android.permission.WAKE_LOCK"/>
 
-    <!-- package visibility：PROCESS_TEXT（Flutter 引擎 ProcessTextPlugin）+ GET_CONTENT（file_picker） -->
+    <!-- L1：相机/麦克风都不是必需硬件 —— 不声明 required=false 时应用商店会把
+         「无摄像头平板」「电子墨水设备」直接过滤掉。 -->
+    <uses-feature android:name="android.hardware.camera" android:required="false"/>
+    <uses-feature android:name="android.hardware.microphone" android:required="false"/>
+
+    <!-- package visibility：targetSdk 36 在 Android 11+ 按 `<queries>` 过滤可见性；
+         下面这些 intent 没声明的话 resolveActivity() 会返回 null。 -->
     <queries>
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT"/>
@@ -20,13 +41,41 @@
             <action android:name="android.intent.action.GET_CONTENT"/>
             <data android:mimeType="*/*"/>
         </intent>
+        <!-- 图库选图：Android 13+ 系统 Photo Picker -->
+        <intent>
+            <action android:name="android.intent.action.PICK_IMAGES"/>
+            <data android:mimeType="image/*"/>
+        </intent>
+        <!-- 图库选图：厂商图库（华为等没有 Photo Picker 的机型走这条） -->
+        <intent>
+            <action android:name="android.intent.action.PICK"/>
+            <data android:scheme="content"/>
+            <data android:mimeType="image/*"/>
+        </intent>
+        <!-- 应用内更新：系统安装器（Android 7+ 走 FileProvider 的 content://） -->
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="content"/>
+            <data android:mimeType="application/vnd.android.package-archive"/>
+        </intent>
+        <!-- L3/预测性返回：系统「返回手势」设置页（部分 ROM 需要能跳过去） -->
+        <intent>
+            <action android:name="android.settings.MANAGE_UNKNOWN_APP_SOURCES"/>
+            <data android:scheme="package"/>
+        </intent>
     </queries>
 
     <application
         android:label="@string/app_name"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
-        android:usesCleartextTraffic="false">
+        android:usesCleartextTraffic="false"
+        android:allowBackup="false"
+        android:fullBackupContent="false"
+        android:enableOnBackInvokedCallback="true">
+        <!-- L2：allowBackup=false —— 换机助手/云备份只会搬走 DB 而搬不走附件，
+             恢复后会出现「会话在、图片全丢」的假完整状态，所以干脆不参与备份
+             （导出走「存到手机」的 ZIP，是完整的）。 -->
         <activity
             android:name=".MainActivity"
             android:exported="true"

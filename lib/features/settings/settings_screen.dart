@@ -26,6 +26,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import 'package:keepsake/core/brain/brain_service.dart';
 import 'package:keepsake/core/characters/card_backfill_task.dart';
@@ -556,7 +557,23 @@ class _BackgroundTasksSection extends ConsumerWidget {
         ),
       );
     }
-    return Column(children: rows);
+    // M1（轻量版）：没有前台服务，国产 ROM 会冻结/杀掉后台任务；明示可续跑，
+    // 避免用户以为卡死（进度条不动 ≠ 数据丢了）。
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        ...rows,
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+          child: Text(
+            '切到后台可能被系统暂停，回到 App 会自动续跑',
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ),
+      ],
+    );
   }
 }
 
@@ -723,12 +740,57 @@ class _UpdateTileState extends State<_UpdateTile> {
       await _confirm(info);
     } on UpdateException catch (error) {
       debugPrint('检查更新失败（silent=$silent）：${error.message}');
-      if (!silent && mounted) _toast(error.message);
+      // H3：不再只 toast 一句「请求超时」——失败对话框里给「在浏览器打开」。
+      if (!silent && mounted) {
+        await _showFailureDialog(error.message, manualUrl: error.manualUrl);
+      }
     } catch (error) {
       debugPrint('检查更新异常（silent=$silent）：$error');
-      if (!silent && mounted) _toast('检查更新失败：$error');
+      if (!silent && mounted) {
+        await _showFailureDialog('检查更新失败：$error');
+      }
     } finally {
       if (mounted) setState(() => _checking = false);
+    }
+  }
+
+  /// 失败对话框：文案 + 「在浏览器打开」（H3/H4 兜底）。
+  ///
+  /// [manualUrl] 为空时退回 [UpdateService.manualUrl]（Release 页）；
+  /// 这样下载阶段的网络失败也能落到手动下载。
+  Future<void> _showFailureDialog(String message, {String? manualUrl}) async {
+    if (!mounted) return;
+    final String url = manualUrl ?? UpdateService.manualUrl;
+    final bool? open = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('更新没有走通'),
+        content: Text(message),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('知道了'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('在浏览器打开'),
+          ),
+        ],
+      ),
+    );
+    if (open == true) await _openInBrowser(url);
+  }
+
+  /// 用系统浏览器打开 [url]；没有可用浏览器时明确提示（不静默失败）。
+  Future<void> _openInBrowser(String url) async {
+    try {
+      final opened = await launchUrl(
+        Uri.parse(url),
+        mode: LaunchMode.externalApplication,
+      );
+      if (!opened && mounted) _toast('没有可用的浏览器，请手动打开：$url');
+    } catch (error) {
+      if (mounted) _toast('打开浏览器失败：$error');
     }
   }
 
@@ -869,19 +931,51 @@ class _UpdateTileState extends State<_UpdateTile> {
       if (mounted) _toast('已打开系统安装器，按提示完成安装');
     } on NeedInstallPermission catch (error) {
       closeProgress();
-      if (mounted) _toast('${error.message}，已打开设置，允许后请重试');
-      await UpdateService.openInstallSettings();
+      // H4：安装被拦时不再只 toast 一句 —— 按厂商讲清关在哪，再给两个出口。
+      final String? action = await _showInstallBlockedDialog(error.message);
+      if (action == 'settings') {
+        await UpdateService.openInstallSettings();
+      } else if (action == 'browser') {
+        await _openInBrowser(error.manualUrl ?? UpdateService.manualUrl);
+      }
     } on UpdateException catch (error) {
       closeProgress();
-      if (mounted) _toast(error.message);
+      await _showFailureDialog(error.message, manualUrl: error.manualUrl);
     } catch (error) {
       closeProgress();
-      if (mounted) _toast('下载更新失败：$error');
+      await _showFailureDialog('下载更新失败：$error');
     } finally {
       // 退场动画期间 ValueListenableBuilder 仍挂着监听，这里不 dispose（交给 GC），
       // 与上面 TextEditingController 的处理保持一致。
       closeProgress();
     }
+  }
+
+  /// 安装被拦（H4）：按厂商说明关什么，再给「去设置 / 在浏览器打开」。
+  /// 返回 `'settings'` / `'browser'` / null（取消）。
+  Future<String?> _showInstallBlockedDialog(String message) async {
+    if (!mounted) return null;
+    return showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('安装被系统拦住了'),
+        content: Text(message),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop('settings'),
+            child: const Text('去设置'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop('browser'),
+            child: const Text('在浏览器打开'),
+          ),
+        ],
+      ),
+    );
   }
 
   void _toast(String message) {

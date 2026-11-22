@@ -418,6 +418,10 @@ class _SessionsScreenState extends ConsumerState<SessionsScreen> {
   }
 
   /// 「导出」：先选出口（存到手机 / 分享），再生成选中会话的 ZIP。
+  ///
+  /// M7：出口顺序固定「存到手机」在前 —— 微信不接收 `application/zip`，
+  /// 国内用户最常见的「发我微信」在分享面板里要么没有微信、要么发了失败，
+  /// 所以默认动作改成先落盘，再用文件管理器发送。
   Future<void> _exportSelected() async {
     if (_selectedIds.isEmpty || _exporting) return;
     final List<String> ids = _selectedIds.toList(growable: false);
@@ -431,13 +435,13 @@ class _SessionsScreenState extends ConsumerState<SessionsScreen> {
             ListTile(
               leading: const Icon(Icons.folder_outlined),
               title: const Text('存到手机'),
-              subtitle: const Text('选一个目录保存 ZIP（如下载目录）'),
+              subtitle: const Text('选一个目录保存 ZIP（如下载目录）· 推荐'),
               onTap: () => Navigator.of(sheetContext).pop('save'),
             ),
             ListTile(
               leading: const Icon(Icons.ios_share),
               title: const Text('分享'),
-              subtitle: const Text('调系统分享面板发给其他 App'),
+              subtitle: const Text('调系统分享面板；微信不支持 ZIP，建议先用「存到手机」'),
               onTap: () => Navigator.of(sheetContext).pop('share'),
             ),
             const Divider(height: 1),
@@ -453,13 +457,44 @@ class _SessionsScreenState extends ConsumerState<SessionsScreen> {
     );
     if (!mounted || mode == null) return;
 
+    // 分享前先提示一次，并允许当场改成「存到手机」。
+    String? choice = mode;
+    if (choice == 'share') {
+      choice = await _confirmZipShare();
+      if (!mounted || choice == null) return;
+    }
+
     final ExportResult? result = await _buildSubsetZip(ids);
     if (result == null || !mounted) return;
-    if (mode == 'share') {
+    if (choice == 'share') {
       await _shareSubsetZip(result);
     } else {
       await _saveSubsetZipToDevice(result);
     }
+  }
+
+  /// 分享 ZIP 前的提示（M7）。返回 `'share'`（继续分享）/ `'save'`（改成存到手机）/ null。
+  Future<String?> _confirmZipShare() {
+    return showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('分享 ZIP'),
+        content: const Text(
+          '微信不支持压缩包，可先保存再用文件管理器发送。'
+          'QQ / 邮箱 / 网盘一般能直接接收。',
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop('save'),
+            child: const Text('改为存到手机'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop('share'),
+            child: const Text('仍要分享'),
+          ),
+        ],
+      ),
+    );
   }
 
   /// 生成选中会话的 ZIP（临时目录）；失败 toast 并返回 null。
@@ -493,7 +528,10 @@ class _SessionsScreenState extends ConsumerState<SessionsScreen> {
         _toast('已取消保存');
         return;
       }
-      _toast('已保存到 ${_uriLabel(uri)}');
+      // M12：SAF 返回的 content:// 是内部 id，回显只有噪音；
+      // 只有真拿到 file:// 路径时才显示具体位置。
+      final String? label = _uriLabel(uri);
+      _toast(label == null ? '已保存到你选择的位置' : '已保存到 $label');
     } catch (error) {
       if (mounted) _toast('保存失败：$error');
     }
@@ -515,21 +553,18 @@ class _SessionsScreenState extends ConsumerState<SessionsScreen> {
     }
   }
 
-  /// `file_picker` 返回的 Uri → 可读路径（Android 可能是 `content://`，退化成解码后的 path）。
-  static String _uriLabel(Uri uri) {
-    if (uri.scheme == 'file') {
-      try {
-        return uri.toFilePath();
-      } catch (_) {
-        // 落到下面的通用分支。
-      }
-    }
-    final String path = uri.path;
-    if (path.isEmpty) return uri.toString();
+  /// `file_picker` 返回的 Uri → 可读路径；解析不出可读位置时返回 null（M12）。
+  ///
+  /// Android 上 SAF 的 `saveFile` 回的是 `content://com.android.providers.*/...`，
+  /// 那是内部 id，直接回显只会给用户一长串 `content%3A%2F%2F...` —— 不如说
+  /// 「已保存到你选择的位置」。只有真拿到 `file://` 时才显示具体路径。
+  static String? _uriLabel(Uri uri) {
+    if (uri.scheme != 'file') return null;
     try {
-      return Uri.decodeComponent(path);
+      return uri.toFilePath();
     } catch (_) {
-      return path;
+      // 非法 file:// URI（Windows 上偶见于 URI 编码异常）：同样退回固定文案。
+      return null;
     }
   }
 
@@ -1012,6 +1047,18 @@ class _ImportProgressBannerState extends ConsumerState<_ImportProgressBanner> {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+            // M1（轻量版）：没有前台服务，国产 ROM 会把后台任务冻结/杀掉；
+            // 这里明示「可续跑」，避免用户以为进度卡死、反复杀 App 重开。
+            if (showRunning)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  '切到后台可能被系统暂停，回到 App 会自动续跑',
+                  style: theme.textTheme.labelSmall?.copyWith(
                     color: theme.colorScheme.onSurfaceVariant,
                   ),
                 ),

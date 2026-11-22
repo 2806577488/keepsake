@@ -112,9 +112,11 @@ jobs:
           set -euo pipefail
           # Maven Central 会对 CI 共享 IP 返回 429（Too Many Requests），
           # 这是临时性限流：失败后重试，最多 3 次。
+          # 同时打包 32 位（arm）与 64 位（arm64）：Android 8–10 的老低端机多是 32 位，
+          # 只出 arm64 会「装上就崩/装不上」。体积大一些，换兼容性。
           for attempt in 1 2 3; do
             echo "构建尝试 $attempt/3"
-            if flutter build apk --release --target-platform android-arm64; then
+            if flutter build apk --release --target-platform android-arm,android-arm64; then
               exit 0
             fi
             if [ "$attempt" -lt 3 ]; then
@@ -130,7 +132,7 @@ jobs:
         run: |
           set -euo pipefail
           VERSION="${{ steps.version.outputs.version }}"
-          APK="keepsake-${VERSION}-arm64.apk"
+          APK="keepsake-${VERSION}-universal.apk"
           mkdir -p dist
           cp build/app/outputs/flutter-apk/app-release.apk "dist/${APK}"
           ( cd dist && sha256sum "$APK" > "${APK}.sha256" )
