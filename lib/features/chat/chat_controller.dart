@@ -2239,6 +2239,12 @@ class ChatController extends Notifier<ChatUiState> {
   String _errorMessageOf(Object error) {
     if (error is ApiError) {
       final message = error.message.trim();
+      // M8：网络类 ApiError 的文案统一是「网络错误」，真正原因在 cause 里
+      // （HandshakeException / ClientException / SocketException，含 Dart 对
+      // 明文 http 的拦截）。不翻 cause 的话用户永远只看到「网络错误」。
+      final cause = error.cause;
+      final hint = cause == null ? null : _networkHintOfText(cause.toString());
+      if (hint != null) return hint;
       return message.isEmpty ? kConnectionLostMessage : message;
     }
     final raw = error.toString().trim();
@@ -2255,21 +2261,8 @@ class ChatController extends Notifier<ChatUiState> {
         lower.contains('being used by another process')) {
       return '本地文件被占用（可能正被其它应用读写），稍后重试';
     }
-    if (lower.contains('socketexception') ||
-        lower.contains('connection refused') ||
-        lower.contains('network is unreachable') ||
-        lower.contains('failed host lookup') ||
-        lower.contains('clientexception') ||
-        lower.contains('connection closed') ||
-        lower.contains('connection reset')) {
-      return '网络连接失败，检查网络后重试';
-    }
-    if (lower.contains('timeout') || lower.contains('timed out')) {
-      return '请求超时，稍后重试';
-    }
-    if (lower.contains('handshake') || lower.contains('certificate')) {
-      return '安全连接失败（证书校验未通过）';
-    }
+    final hint = _networkHintOfText(text);
+    if (hint != null) return hint;
     if (lower.contains('filesystemexception') || lower.contains('errno')) {
       return '读写本地文件失败（存储空间或权限问题）';
     }
@@ -2284,6 +2277,35 @@ class ChatController extends Notifier<ChatUiState> {
     }
     // 兜底：绝不把英文原文直接抛给用户（需要原文时看 debugPrint）。
     return '出现错误，请重试';
+  }
+
+  /// M8：把网络层异常关键词翻成「下一步该做什么」的中文短句。
+  ///
+  /// 返回 `null` 表示不是这四类网络错误，交给调用方的其它分支处理。
+  static String? _networkHintOfText(String raw) {
+    final lower = raw.toLowerCase();
+    if (lower.contains('handshake') || lower.contains('certificate')) {
+      // 自建 http 中转被填成 https 时，最先撞到的就是证书校验失败。
+      return 'TLS 证书校验失败（若用自建 HTTP 中转，请确认地址是 http:// 而不是 https://）';
+    }
+    if (lower.contains('cleartext') || lower.contains('insecure http')) {
+      // Android 的 usesCleartextTraffic 拦截明文 http（Dart 层报的是这个）。
+      return '系统禁止明文 HTTP 请求：请改用 HTTPS；只有内网/本机地址才考虑 http://';
+    }
+    if (lower.contains('socketexception') ||
+        lower.contains('connection refused') ||
+        lower.contains('network is unreachable') ||
+        lower.contains('failed host lookup') ||
+        lower.contains('clientexception') ||
+        lower.contains('connection closed') ||
+        lower.contains('connection reset')) {
+      // Dart 的 http 不读取系统 HTTP 代理，Clash/Quantumult 的「HTTP 代理模式」连不上。
+      return '网络连不上（若用了 HTTP 代理，请改用 VPN/系统代理模式，App 不读取 HTTP 代理）';
+    }
+    if (lower.contains('timeout') || lower.contains('timed out')) {
+      return '请求超时，稍后重试';
+    }
+    return null;
   }
 }
 

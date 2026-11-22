@@ -184,3 +184,33 @@
    - M5 / M6（大字体与大屏）、M7（导出主出口改"保存"）、M8（网络诊断）、M9（权限声明清理），其余低风险项随版本带走。
 
 > 本次审计未修改任何代码；唯一写入的是本报告。所有"修法"均为建议，落地前建议先做 P0 的两处改动再上真机验证表（§五）的第一、二行——那两行决定后面所有图库结论是否还成立。
+
+## 七、L5 评估结论
+
+**结论：不需要升级，建议保持现状（本次未改 `pubspec.yaml` / `pubspec.lock`）。**
+
+### 现状（读依赖清单）
+
+- `pubspec.yaml:27-28`：`sqlite3: ^3.9.1`、`sqlite3_flutter_libs: ^0.6.0+eol`；
+- `pubspec.lock`：`sqlite3 3.9.1`（`3.9.1` 的 sha256 与 pub.dev 最新版一致）、`sqlite3_flutter_libs 0.6.0+eol`、`drift 2.35.4`、`drift_flutter 0.3.1`；
+- 代码侧 `lib/core/db/database.dart:1146` 用 `driftDatabase(name: 'keepsake', native: DriftNativeOptions(...))`，没有手写 `open.overrideFor` / `sqlite3_flutter_libs` 初始化代码（全项目 grep 零命中）。
+
+### 关键事实：已经处在 drift 官方的 native assets 路径上
+
+1. `sqlite3_flutter_libs 0.6.0+eol` 在 pub.dev 上的描述就是 **“Not used anymore, update to version 3.x of package:sqlite3 instead”**；它的 `pubspec.yaml` 只有一行 SDK 约束，**没有 `flutter.plugin`、没有任何依赖**——它已经从“带 `.so` 的 Flutter 插件”退化成一个空壳占位包，构建时不会往 APK 里塞任何原生库。
+2. `drift_flutter 0.3.1` 的 `pubspec.yaml` 依赖 `sqlite3: ^3.0.0`，并在注释里写明：保留 `sqlite3_flutter_libs: ^0.6.0+eol` 只是**不希望用户继续停在 0.5.x**，Flutter 专用的构建脚本应当删除。也就是说，`0.6.0+eol` 正是 drift 官方为 `sqlite3` 3.x 准备的那个“推荐版本”，本项目已经在用。
+3. `sqlite3 3.9.1` 的依赖里已经出现 `hooks`、`code_assets`、`native_toolchain_c`——`sqlite3` 3.x 通过 **Dart native assets（`hook/build.dart`）** 在 `flutter build` 时交叉编译并打包 `libsqlite3.so`。审计 §9 实测 APK 里 `arm64-v8a/libsqlite3.so` 存在且 `p_align = 16384`，与“空壳插件 + native assets 产出库”完全对得上。
+
+因此 L5 原本担心的“`0.6.0+eol` 已 EOL、要不要升级到 native assets 版”是个**已经完成的迁移**：`sqlite3_flutter_libs` 的 EOL 是“功能搬进 `sqlite3` 3.x”后的正常退役，不是“还在用旧插件”的信号。
+
+### 为什么建议暂不升级 / 不动依赖
+
+- **没有运行时风险**：空壳包不参与编译、不注入 `.so`，真正跑在设备上的是 `sqlite3 3.9.1` 的 native assets 产物；继续留在 `0.6.0+eol` 只是为了满足 `drift_flutter` 的版本约束。
+- **改动没有收益**：可选动作只有“从 `pubspec.yaml` 删掉直接依赖 `sqlite3_flutter_libs`”，但 `drift_flutter` 仍会把它作为传递依赖拉进来，lock 里版本不变、APK 内容不变，只是清单少一行。这个动作会改 `pubspec.lock` 的 `dependency` 标记（`direct main` → `transitive`），对本次兼容性目标零收益，且用户已明确禁止改依赖版本。
+- **真正的升级风险在构建链，不在 DB 代码**：若将来为了 `sqlite3` 4.x / 新 hooks 规范而升级，需要同时满足：① Flutter 版本支持新的 `code_assets`/`hooks` 规范；② CI（`.github/workflows/release.yml`）的 NDK/clang 交叉编译链可用（当前可用）；③ 重新验证 `arm64-v8a` / `armeabi-v7a` 的 `.so` 产出与 16 KB `p_align`；④ 回归 DB：新建库、`schemaVersion 5` 的老库升级（`onUpgrade` 的逐版本 `ALTER TABLE`）、导入/导出。这属于“改依赖 + 动 CI + 全套 DB 迁移回归”，成本高、收益仅为“清单更新”。
+- **触发升级的时机**：Flutter 强制要求新 native assets 规范、`sqlite3` 3.x 停止维护、或 Android 16 真机上出现 `libsqlite3.so` 装载/页对齐问题。到那时再按上面的四项一次性做，并优先在 `arm64 + armeabi-v7a` 两台真机上验。
+
+### 本次验证范围
+
+- 只读了 `pubspec.yaml` / `pubspec.lock` / `drift_flutter` 与 `sqlite3` 的 pub 包描述，**未改任何依赖、未跑 `flutter build`**（按约定构建由用户统一执行）。
+- 结论落地不需要动 `lib/core/db/database.dart`：现有 `driftDatabase(...)` 写法与 native assets 完全兼容，迁移逻辑保持不变。

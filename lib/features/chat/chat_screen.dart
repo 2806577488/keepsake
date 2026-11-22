@@ -88,6 +88,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   /// 是否正在发送（防止连点）。
   bool _sending = false;
 
+  /// 是否正在等图库返回（M10：轻量 loading，只转圈+禁用附件按钮，不弹模态）。
+  bool _picking = false;
+
   /// 已调度的滚动任务（合并同一帧的多次滚动请求）。
   bool _scrollScheduled = false;
 
@@ -496,6 +499,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   /// `ACTION_PICK_IMAGES` → `ACTION_GET_CONTENT`（可多选）→ `ACTION_PICK`，
   /// 打开的都是「图库」界面；返回的已经是复制到缓存的本地路径。
   Future<void> _pickImages() async {
+    if (_picking) return; // 防连点：上一次还在等系统图库
+    setState(() => _picking = true);
     try {
       final List<String> paths = await GalleryPicker.pickImages();
       for (final String path in paths) {
@@ -507,11 +512,20 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         }
       }
     } on PlatformException catch (error) {
-      _toast('打开图库失败：${error.message ?? error.code}');
+      if (error.code == 'PICK_TIMEOUT') {
+        // M10：选图期间进程被系统回收 → 通道永不返回，90s 超时兜底。
+        _toast('上次选图被系统中断了，请再选一次');
+      } else if (error.code == 'BUSY') {
+        _toast('上一次选图还没结束，稍等一下再点');
+      } else {
+        _toast('打开图库失败：${error.message ?? error.code}');
+      }
     } catch (error) {
       // 原生返回的本地路径可能已失效（缓存被系统清掉），XFile.length() 会抛
       // FileSystemException —— 这里必须兜住，否则就是未处理异常（M2）。
       _toast('读取图片失败：$error');
+    } finally {
+      if (mounted) setState(() => _picking = false);
     }
   }
 
@@ -1079,6 +1093,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     final last = state.lastMessage;
 
     return Scaffold(
+      // L6：横屏 + 键盘 + 大字体下由 Scaffold 自行让出键盘高度（默认 true，
+      // 这里显式写出来，避免以后有人误关）。
+      resizeToAvoidBottomInset: true,
       appBar: AppBar(
         titleSpacing: 8,
         title: Column(
@@ -1129,87 +1146,104 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
           ),
         ],
       ),
-      body: Column(
-        children: <Widget>[
-          // 用量条在 AppBar 下方、消息区之上、左对齐；设计建议「占用 < 80%
-          // 时不出现」，只在接近上下文上限或出错时才占一条位置。
-          _SessionUsageGate(
-            sessionId: state.sessionId,
-            hasError: (state.error ?? '').trim().isNotEmpty,
-          ),
-          _ErrorBanner(
-            message: state.error,
-            onRetry: () => unawaited(_controller.retry()),
-            onDismiss: _controller.dismissError,
-          ),
-          if (state.uploading) const LinearProgressIndicator(minHeight: 2),
-          Expanded(
-            child: Stack(
-              children: <Widget>[
-                Positioned.fill(child: _buildMessageList(state)),
-                Positioned(
-                  right: 12,
-                  bottom: 12,
-                  child: ValueListenableBuilder<bool>(
-                    valueListenable: _autoFollow,
-                    builder:
-                        (BuildContext context, bool autoFollow, Widget? child) {
-                          if (autoFollow || state.messages.isEmpty) {
-                            return const SizedBox.shrink();
-                          }
-                          return _ArrowButton(
-                            icon: Icons.keyboard_arrow_down_rounded,
-                            tooltip: '滚动到底',
-                            onPressed: _jumpToBottom,
-                          );
-                        },
-                  ),
+      body: LayoutBuilder(
+        builder: (BuildContext context, BoxConstraints constraints) {
+          // L6：横屏 + 键盘 + 大字体时 body 会被压得很矮；此时先收起工具芯片行，
+          // 把高度留给「消息列表 + 输入栏」，避免 Column 溢出（黄黑条）。
+          final bool landscape =
+              MediaQuery.orientationOf(context) == Orientation.landscape;
+          final bool compact = landscape && constraints.maxHeight < 220;
+          return Column(
+            children: <Widget>[
+              // 用量条在 AppBar 下方、消息区之上、左对齐；设计建议「占用 < 80%
+              // 时不出现」，只在接近上下文上限或出错时才占一条位置。
+              _SessionUsageGate(
+                sessionId: state.sessionId,
+                hasError: (state.error ?? '').trim().isNotEmpty,
+              ),
+              _ErrorBanner(
+                message: state.error,
+                onRetry: () => unawaited(_controller.retry()),
+                onDismiss: _controller.dismissError,
+              ),
+              if (state.uploading) const LinearProgressIndicator(minHeight: 2),
+              Expanded(
+                child: Stack(
+                  children: <Widget>[
+                    Positioned.fill(child: _buildMessageList(state)),
+                    Positioned(
+                      right: 12,
+                      bottom: 12,
+                      child: ValueListenableBuilder<bool>(
+                        valueListenable: _autoFollow,
+                        builder:
+                            (
+                              BuildContext context,
+                              bool autoFollow,
+                              Widget? child,
+                            ) {
+                              if (autoFollow || state.messages.isEmpty) {
+                                return const SizedBox.shrink();
+                              }
+                              return _ArrowButton(
+                                icon: Icons.keyboard_arrow_down_rounded,
+                                tooltip: '滚动到底',
+                                onPressed: _jumpToBottom,
+                              );
+                            },
+                      ),
+                    ),
+                  ],
                 ),
-              ],
-            ),
-          ),
-          _PendingChips(
-            attachments: state.pendingAttachments,
-            uploading: state.uploading,
-            onRemove: _controller.removeAttachment,
-          ),
-          _ComposerTools(
-            searchEnabled: state.searchEnabled,
-            // 芯片显示**当前生效值**（会话覆盖 ?? 全局默认），不是全局默认值本身。
-            thinkingEnabled: state.thinkingEnabled,
-            thinkingLevel: state.thinkingLevel,
-            contextKeepRounds: state.contextKeepRounds,
-            supportsSearch: supportsSearch,
-            supportsThinking: supportsThinking,
-            onToggleSearch: () =>
-                unawaited(_controller.setSearchEnabled(!state.searchEnabled)),
-            onToggleThinking: () => unawaited(
-              _controller.setThinkingEnabled(!state.thinkingEnabled),
-            ),
-            onEditThinkingLevel: () => unawaited(_editThinkingLevel()),
-            onEditContextBudget: () => unawaited(_editContextBudget()),
-          ),
-          _InputBar(
-            controller: _input,
-            focusNode: _inputFocus,
-            streaming: state.streaming,
-            sending: _sending,
-            canSend:
-                _input.text.trim().isNotEmpty ||
-                state.pendingAttachments.isNotEmpty,
-            canAttach: state.canAttach,
-            voiceMode: _voiceMode,
-            holdState: _holdState,
-            onSend: () => unawaited(_send()),
-            onStop: () => unawaited(_stop()),
-            onPickFiles: () => unawaited(_showAttachMenu()),
-            onVoiceToggle: _voice,
-            onPointerDown: (PointerDownEvent event) =>
-                unawaited(_onFieldPointerDown(event)),
-            onPointerUp: _onFieldPointerUp,
-            onPointerCancel: _onFieldPointerCancel,
-          ),
-        ],
+              ),
+              _PendingChips(
+                attachments: state.pendingAttachments,
+                uploading: state.uploading,
+                onRemove: _controller.removeAttachment,
+              ),
+              if (!compact)
+                _ComposerTools(
+                  searchEnabled: state.searchEnabled,
+                  // 芯片显示**当前生效值**（会话覆盖 ?? 全局默认），不是全局默认值本身。
+                  thinkingEnabled: state.thinkingEnabled,
+                  thinkingLevel: state.thinkingLevel,
+                  contextKeepRounds: state.contextKeepRounds,
+                  supportsSearch: supportsSearch,
+                  supportsThinking: supportsThinking,
+                  onToggleSearch: () => unawaited(
+                    _controller.setSearchEnabled(!state.searchEnabled),
+                  ),
+                  onToggleThinking: () => unawaited(
+                    _controller.setThinkingEnabled(!state.thinkingEnabled),
+                  ),
+                  onEditThinkingLevel: () => unawaited(_editThinkingLevel()),
+                  onEditContextBudget: () => unawaited(_editContextBudget()),
+                ),
+              _InputBar(
+                controller: _input,
+                focusNode: _inputFocus,
+                streaming: state.streaming,
+                sending: _sending,
+                picking: _picking,
+                compact: compact,
+                canSend:
+                    _input.text.trim().isNotEmpty ||
+                    state.pendingAttachments.isNotEmpty,
+                canAttach: state.canAttach,
+                voiceMode: _voiceMode,
+                holdState: _holdState,
+                onSend: () => unawaited(_send()),
+                onStop: () => unawaited(_stop()),
+                onPickFiles: () => unawaited(_showAttachMenu()),
+                onVoiceToggle: _voice,
+                onPointerDown: (PointerDownEvent event) =>
+                    unawaited(_onFieldPointerDown(event)),
+                onPointerUp: _onFieldPointerUp,
+                onPointerCancel: _onFieldPointerCancel,
+              ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -1235,25 +1269,31 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     final listCount = state.messages.length - from + (hasEarlier ? 1 : 0);
     // M6：大屏/折叠屏上整条消息流居中并限宽 720，
     // 不让内容从屏幕左缘一直铺到右缘（中文一行 40 字左右的舒适阅读宽度）。
-    return Center(
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 720),
-        child: ScrollablePositionedList.builder(
-          itemCount: listCount,
-          itemScrollController: _itemScrollController,
-          itemPositionsListener: _itemPositions,
-          padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-          itemBuilder: (BuildContext context, int index) {
-            if (hasEarlier && index == 0) {
-              return _EarlierMessagesButton(onTap: () => _loadEarlier(from));
-            }
-            final messageIndex = from + index - (hasEarlier ? 1 : 0);
-            final message = state.messages[messageIndex];
-            return KeyedSubtree(
-              key: ValueKey<String>(message.id),
-              child: _buildBubble(context, state, message, messageIndex),
-            );
-          },
+    // L6：横屏时刘海/挖孔在左右侧，SafeArea 只避让左右（top 由 AppBar 负责，
+    // bottom 交给输入栏自己的 SafeArea，避免键盘弹起时叠加两层 padding）。
+    return SafeArea(
+      top: false,
+      bottom: false,
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 720),
+          child: ScrollablePositionedList.builder(
+            itemCount: listCount,
+            itemScrollController: _itemScrollController,
+            itemPositionsListener: _itemPositions,
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+            itemBuilder: (BuildContext context, int index) {
+              if (hasEarlier && index == 0) {
+                return _EarlierMessagesButton(onTap: () => _loadEarlier(from));
+              }
+              final messageIndex = from + index - (hasEarlier ? 1 : 0);
+              final message = state.messages[messageIndex];
+              return KeyedSubtree(
+                key: ValueKey<String>(message.id),
+                child: _buildBubble(context, state, message, messageIndex),
+              );
+            },
+          ),
         ),
       ),
     );
@@ -2543,6 +2583,7 @@ class _ComposerTools extends StatelessWidget {
   Widget build(BuildContext context) {
     // M5：芯片行不再固定 44 高，改由 chip 的 minHeight 决定整体高度。
     // 横向滚动仍保留（芯片多时不会挤成两行）。
+    // L6：横屏时这一行本来就是横向可滚动，不会把输入栏顶出屏幕。
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       padding: const EdgeInsets.symmetric(horizontal: 10),
@@ -2722,6 +2763,8 @@ class _InputBar extends StatefulWidget {
     required this.focusNode,
     required this.streaming,
     required this.sending,
+    required this.picking,
+    required this.compact,
     required this.canSend,
     required this.canAttach,
     required this.voiceMode,
@@ -2739,6 +2782,12 @@ class _InputBar extends StatefulWidget {
   final FocusNode focusNode;
   final bool streaming;
   final bool sending;
+
+  /// 是否正在等系统图库返回（M10：附件按钮转圈并禁用）。
+  final bool picking;
+
+  /// L6：横屏被键盘压得很矮时收紧输入栏（padding 更小、最多 3 行）。
+  final bool compact;
   final bool canSend;
   final bool canAttach;
   final bool voiceMode;
@@ -2793,7 +2842,9 @@ class _InputBarState extends State<_InputBar> {
     return SafeArea(
       top: false,
       child: Container(
-        padding: const EdgeInsets.fromLTRB(8, 4, 8, 8),
+        padding: widget.compact
+            ? const EdgeInsets.fromLTRB(8, 2, 8, 4)
+            : const EdgeInsets.fromLTRB(8, 4, 8, 8),
         decoration: BoxDecoration(
           color: scheme.surface,
           border: Border(
@@ -2806,15 +2857,24 @@ class _InputBarState extends State<_InputBar> {
           crossAxisAlignment: CrossAxisAlignment.end,
           children: <Widget>[
             IconButton(
-              onPressed: widget.voiceMode ? null : widget.onPickFiles,
-              tooltip: '添加附件',
+              // M10：等图库返回时禁用并转圈（轻量 loading，不弹模态）。
+              onPressed: (widget.voiceMode || widget.picking)
+                  ? null
+                  : widget.onPickFiles,
+              tooltip: widget.picking ? '正在打开图库…' : '添加附件',
               visualDensity: VisualDensity.compact,
-              icon: Icon(
-                Icons.add_circle_outline_rounded,
-                color: widget.canAttach
-                    ? scheme.onSurfaceVariant
-                    : scheme.onSurfaceVariant.withValues(alpha: 0.4),
-              ),
+              icon: widget.picking
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : Icon(
+                      Icons.add_circle_outline_rounded,
+                      color: widget.canAttach
+                          ? scheme.onSurfaceVariant
+                          : scheme.onSurfaceVariant.withValues(alpha: 0.4),
+                    ),
             ),
             Expanded(
               child: widget.voiceMode
@@ -2880,7 +2940,7 @@ class _InputBarState extends State<_InputBar> {
                       controller: widget.controller,
                       focusNode: widget.focusNode,
                       minLines: 1,
-                      maxLines: 6,
+                      maxLines: widget.compact ? 3 : 6,
                       textInputAction: TextInputAction.newline,
                       style: theme.textTheme.bodyMedium,
                       decoration: InputDecoration(

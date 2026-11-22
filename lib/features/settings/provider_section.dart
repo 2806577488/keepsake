@@ -454,15 +454,65 @@ class _ProviderEditSheetState extends ConsumerState<ProviderEditSheet> {
               ),
             ),
             const SizedBox(height: 12),
-            TextField(
-              controller: _base,
-              keyboardType: TextInputType.url,
-              textInputAction: TextInputAction.next,
-              decoration: const InputDecoration(
-                labelText: '接口地址（含版本号）',
-                hintText: '例如 https://api.siliconflow.cn/v1',
-                border: OutlineInputBorder(),
-              ),
+            // M8：scheme 不再被强制改成 https；http 时给持久提示，
+            // 并实时显示「实际请求地址」方便自查（拼接后的 /chat/completions）。
+            ValueListenableBuilder<TextEditingValue>(
+              valueListenable: _base,
+              builder: (BuildContext context, TextEditingValue value, _) {
+                final raw = value.text.trim();
+                final isCleartext = raw.toLowerCase().startsWith('http://');
+                final preview = providerRequestUrlPreview(value.text, _kind);
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: <Widget>[
+                    TextField(
+                      controller: _base,
+                      keyboardType: TextInputType.url,
+                      textInputAction: TextInputAction.next,
+                      decoration: const InputDecoration(
+                        labelText: '接口地址（含版本号）',
+                        hintText: '例如 https://api.siliconflow.cn/v1',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    if (isCleartext)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 6),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: <Widget>[
+                            Icon(
+                              Icons.warning_amber_rounded,
+                              size: 15,
+                              color: theme.colorScheme.error,
+                            ),
+                            const SizedBox(width: 5),
+                            Expanded(
+                              child: Text(
+                                '明文 HTTP 只建议内网/本机使用，公网请用 HTTPS',
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: theme.colorScheme.error,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    if (preview.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 6),
+                        child: Text(
+                          '实际请求：$preview',
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ),
+                  ],
+                );
+              },
             ),
             const SizedBox(height: 12),
             TextField(

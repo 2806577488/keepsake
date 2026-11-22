@@ -272,8 +272,13 @@ final ProviderPreset deepSeekPreset = providerPresets.first;
 
 /// 规范化用户填写的接口地址：
 /// - 去首尾空白与尾部 `/`；
-/// - 无 scheme 时自动补 `https://`（`usesCleartextTraffic=false`，只允许 https）；
+/// - **保留用户填写的 scheme**：`http://` 原样保留，不静默改成 `https://`
+///   （自建 http 中转 / 内网地址被改写会直接 TLS 失败）；
+/// - 无 scheme 时自动补 `https://`（Android 默认禁止明文，缺省按安全的一侧走）；
 /// - 空串原样返回空串（由调用方给「先填接口地址」）。
+///
+/// 注意：保留 `http://` 只是不改写字符串；系统层是否允许明文仍由
+/// `AndroidManifest.xml` 的 `usesCleartextTraffic` 决定，设置页会给出提示。
 ///
 /// 符号证据：`normalizeBaseUrl` / `normalizeProviderBase` [确定]。
 String normalizeProviderBase(String raw) {
@@ -285,8 +290,8 @@ String normalizeProviderBase(String raw) {
   if (base.isEmpty) return '';
   final lower = base.toLowerCase();
   if (lower.startsWith('http://')) {
-    // 明文 http 在 Android 上会被 usesCleartextTraffic=false 拦掉，
-    // 但用户可能填的是内网代理；保留原样，由 http 层报错（不静默改协议）。
+    // M8：明文 http 保留原样（可能是内网/本机中转），不在协议上替用户做决定；
+    // 设置页会提示「明文 HTTP 只建议内网/本机使用，公网请用 HTTPS」。
     return base;
   }
   if (!lower.startsWith('https://')) {
@@ -333,6 +338,25 @@ String anthropicBaseOf(String baseUrl) {
   }
   if (lower.endsWith('/v1')) return base;
   return '$base/v1';
+}
+
+/// 「实际请求地址」预览（设置页自查用，M8）。
+///
+/// - OpenAI 兼容：`{base}/chat/completions`；
+/// - Anthropic 兼容：派生基址（[anthropicBaseOf]）后接 `/messages`。
+///
+/// 与 `OpenAiClient`/`AnthropicClient` 的拼接规则保持一致（用户已经粘了完整
+/// 端点时不重复拼接），让用户能直观看出自己填的地址最终会请求到哪里。
+String providerRequestUrlPreview(String baseUrl, ProviderKind kind) {
+  final base = normalizeProviderBase(baseUrl);
+  if (base.isEmpty) return '';
+  if (kind == ProviderKind.anthropic) {
+    final derived = anthropicBaseOf(base);
+    if (derived.toLowerCase().endsWith('/messages')) return derived;
+    return '$derived/messages';
+  }
+  if (base.toLowerCase().endsWith('/chat/completions')) return base;
+  return '$base/chat/completions';
 }
 
 // ---------------------------------------------------------------------------

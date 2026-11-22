@@ -157,8 +157,10 @@ void resetMermaidCache([String? code]) {
 /// 一个 Mermaid 图表块。
 ///
 /// 放在 `markdown_view.dart` 的 `_CodeBuilder` 里：```` ```mermaid ```` 代码块 →
-/// 先看缓存，未渲染过就起一个隐藏 WebView 跑 `mermaid.min.js`，成功后用
-/// `flutter_svg` 画；失败/超时回退成代码块 + 「Mermaid 图表显示失败」。
+/// 默认只显示源码 + 一行「渲染图表」按钮（M11：低端机上首次渲染 3.3MB
+/// mermaid.min.js 会卡顿/超时，不能自动跑）；用户点按钮才起隐藏 WebView，
+/// 成功后用 `flutter_svg` 画并写进进程级缓存，之后（含滚动重建）直接显示图。
+/// 失败/超时回退成代码块 + 「Mermaid 图表显示失败」。
 class MermaidBlock extends StatefulWidget {
   const MermaidBlock({super.key, required this.code});
 
@@ -191,13 +193,11 @@ class _MermaidBlockState extends State<MermaidBlock> {
   /// 每次渲染的唯一 id（`keepsake-mermaid-<id>` 的 id 部分）。
   int _attempt = 0;
 
-  /// 是否已经触发过渲染（避免 build 里反复调度）。
-  bool _scheduled = false;
-
   @override
   void initState() {
     super.initState();
-    _schedule();
+    // M11：不自动渲染，只查缓存（已渲染过的直接显示图）。
+    _readCache();
   }
 
   @override
@@ -207,8 +207,7 @@ class _MermaidBlockState extends State<MermaidBlock> {
       _svg = null;
       _error = null;
       _loading = false;
-      _scheduled = false;
-      _schedule();
+      _readCache();
     }
   }
 
@@ -224,8 +223,11 @@ class _MermaidBlockState extends State<MermaidBlock> {
     super.dispose();
   }
 
-  /// 先查缓存，未命中再排一帧后渲染。
-  void _schedule() {
+  /// 只读缓存：命中成功缓存直接显示图；命中失败缓存显示降级块。
+  ///
+  /// M11：未命中**不**自动渲染——低端机上首次加载 mermaid.min.js 会卡住
+  /// 聊天列表，改成用户点「渲染图表」后才真正起 WebView。
+  void _readCache() {
     final normalized = widget.code.trim();
     if (normalized.isEmpty) {
       _error = kMermaidErrorText;
@@ -239,11 +241,19 @@ class _MermaidBlockState extends State<MermaidBlock> {
     final failed = _failureCache[normalized];
     if (failed != null) {
       _error = failed;
-      return;
     }
-    if (_scheduled) return;
-    _scheduled = true;
-    _loading = true;
+  }
+
+  /// 用户点「渲染图表」/「重试渲染」：显式开始一次渲染。
+  void _startRender() {
+    if (_loading) return;
+    final normalized = widget.code.trim();
+    if (normalized.isEmpty) return;
+    setState(() {
+      _error = null;
+      _svg = null;
+      _loading = true;
+    });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       unawaited(_render());
@@ -447,9 +457,10 @@ class _MermaidBlockState extends State<MermaidBlock> {
     } else if (_error != null) {
       content = _buildFallback(context, _error!);
     } else if (!_loading) {
-      // 还没被调度（理论上只有极短一帧）——给个固定高度占位，避免列表跳动。
-      content = const SizedBox(height: 120);
-    } else {      content = Container(
+      // M11：默认只显示源码 + 「渲染图表」按钮，不自动起 WebView。
+      content = _buildPrompt(context);
+    } else {
+      content = Container(
         height: 120,
         alignment: Alignment.center,
         decoration: BoxDecoration(
@@ -542,6 +553,77 @@ class _MermaidBlockState extends State<MermaidBlock> {
     );
   }
 
+  /// M11：未渲染时的默认态 —— 源码 + 一行「渲染图表」按钮。
+  ///
+  /// 低端机（Redmi 9A 等）首次加载 3.3MB mermaid.min.js 会卡住列表，
+  /// 所以不自动渲染；用户主动点按钮才创建 WebView。
+  Widget _buildPrompt(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Container(
+        clipBehavior: Clip.antiAlias,
+        decoration: BoxDecoration(
+          color: scheme.surfaceContainerLow,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: scheme.outlineVariant),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Padding(
+              padding: const EdgeInsets.fromLTRB(10, 4, 4, 0),
+              child: Row(
+                children: <Widget>[
+                  Icon(
+                    Icons.account_tree_outlined,
+                    size: 15,
+                    color: scheme.onSurfaceVariant,
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      'Mermaid 图表',
+                      style: theme.textTheme.labelMedium?.copyWith(
+                        color: scheme.onSurfaceVariant,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  TextButton.icon(
+                    onPressed: _startRender,
+                    icon: const Icon(Icons.auto_awesome, size: 16),
+                    label: const Text('渲染图表'),
+                    style: TextButton.styleFrom(
+                      visualDensity: VisualDensity.compact,
+                      textStyle: theme.textTheme.labelMedium,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Text(
+                  widget.code.trim(),
+                  style: const TextStyle(
+                    fontFamily: 'monospace',
+                    fontSize: 12.5,
+                    height: 1.45,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   /// 失败/超时回退：标题 + 「Mermaid 图表显示失败」+ 原始代码块 + 重试。
   Widget _buildFallback(BuildContext context, String message) {
     return Padding(
@@ -560,9 +642,8 @@ class _MermaidBlockState extends State<MermaidBlock> {
                   _error = null;
                   _svg = null;
                   _loading = false;
-                  _scheduled = false;
                 });
-                _schedule();
+                _startRender();
               },
               icon: const Icon(Icons.refresh_rounded, size: 16),
               label: const Text('重试渲染'),

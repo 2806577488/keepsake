@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/services.dart';
 
 /// 直接用系统图库选图（原生通道 `keepsake/gallery`）。
@@ -17,15 +19,34 @@ class GalleryPicker {
 
   static const MethodChannel _channel = MethodChannel('keepsake/gallery');
 
+  /// 选图的最长等待时间（M10）。
+  ///
+  /// 选图期间 App 进程可能被系统（低内存/省电策略）回收，原生侧的
+  /// `pendingGalleryResult` 随进程消失，Dart 侧 `invokeMethod` 的 Future
+  /// 就永远不完成 —— 界面会一直停在「点了没反应」。90 秒足够用户完成
+  /// 一次正常选图（含从云端相册加载），超过就当作被系统打断。
+  static const Duration pickTimeout = Duration(seconds: 90);
+
   /// 打开系统图库选图，返回本地缓存路径列表。
   ///
   /// 失败时抛 [PlatformException]，错误码见 `MainActivity.pickImages`：
   /// `NO_GALLERY`（三级都没有可用选择器）/ `BUSY`（上一次选图未结束）/
   /// `COPY_FAILED`（图库返回了图但一张都没读出来）。
+  ///
+  /// 超过 [pickTimeout] 抛 `PICK_TIMEOUT`（M10：进程被系统回收时通道
+  /// 永不返回，必须由 Dart 侧兜底）。
   static Future<List<String>> pickImages() async {
-    final List<Object?>? result = await _channel.invokeMethod<List<Object?>>(
-      'pickImages',
-    );
+    final List<Object?>? result;
+    try {
+      result = await _channel
+          .invokeMethod<List<Object?>>('pickImages')
+          .timeout(pickTimeout);
+    } on TimeoutException {
+      throw PlatformException(
+        code: 'PICK_TIMEOUT',
+        message: '选图被系统中断（等待超时）',
+      );
+    }
     if (result == null) return const <String>[];
     return result.whereType<String>().toList(growable: false);
   }
