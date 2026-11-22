@@ -12,10 +12,12 @@
 library;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'core/providers.dart';
+import 'core/skin_tokens.dart';
 import 'core/theme.dart';
 import 'features/sessions/sessions_screen.dart';
 
@@ -25,6 +27,19 @@ Future<void> main() async {
   final prefs = await SharedPreferences.getInstance();
   final settingsStore = await SettingsStore.load(prefs);
   final providerStore = await ProviderStore.load(prefs);
+
+  // E 纸感皮肤用打包的思源宋体（2.5MB OTF，见 `pubspec.yaml` 的 fonts）。
+  //
+  // Flutter 的 asset 字体是「首次用到这个字体族」时才异步加载并解析整份
+  // 字体文件。如果等到用户点开聊天页才触发，聊天页首帧要等字体解析完成，
+  // 真机上这个等待超过系统 5s 无响应阈值就会弹 ANR——现象正是「冷启动后
+  // 第一次进聊天卡死、再进就正常」（第二次字形已缓存）。
+  //
+  // 所以在 runApp 之前就把它加载好：E 用户冷启动多花一两百毫秒，
+  // 换来之后所有页面同步可用，聊天页不再有首帧等待。
+  if (settingsStore.value.skinId == 'e') {
+    await _preloadSerifFont();
+  }
 
   runApp(
     ProviderScope(
@@ -36,6 +51,19 @@ Future<void> main() async {
       child: const KeepsakeApp(),
     ),
   );
+}
+
+/// 预加载 E 皮肤的主字体（[kSerifFontFamily]）。
+///
+/// 失败不阻塞启动：字体缺失时 Flutter 会退回系统字体，可读但没衬线。
+Future<void> _preloadSerifFont() async {
+  try {
+    final loader = FontLoader(kSerifFontFamily);
+    loader.addFont(rootBundle.load('assets/fonts/KeepsakeSerif-subset.otf'));
+    await loader.load();
+  } catch (_) {
+    // 忽略：退回系统字体，不影响启动。
+  }
 }
 
 /// 应用根 widget。
