@@ -1,0 +1,88 @@
+name: keepsake
+description: "Keepsake（留声）— 本地优先的多平台 AI 对话客户端（Flutter 重建版）"
+publish_to: 'none'
+
+# 版本与原始 APK 0.4.2 (versionCode 4031) 对齐。
+version: 0.4.2+4031
+
+environment:
+  sdk: ^3.14.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  cupertino_icons: ^1.0.8
+
+  # 状态管理 / 依赖注入
+  flutter_riverpod: ^3.5.0
+  provider: ^6.1.5+1
+  state_notifier: ^1.0.0
+  rxdart: ^0.28.0
+
+  # 本地存储
+  drift: ^2.35.4
+  drift_flutter: ^0.3.1
+  sqlite3: ^3.9.1
+  sqlite3_flutter_libs: ^0.6.0+eol
+  shared_preferences: ^2.5.6
+  path_provider: ^2.1.6
+  uuid: ^4.6.0
+  synchronized: ^3.6.1+1
+  collection: ^1.19.1
+  path: ^1.9.1
+
+  # 网络 / LLM
+  http: ^1.6.0
+  mime: ^2.1.0
+  convert: ^3.1.2
+  xml: ^7.0.1
+  archive: ^4.7.1
+
+  # UI / 渲染
+  markdown: ^7.3.1
+  flutter_markdown: ^0.7.7+1
+  highlight: ^0.7.0
+  flutter_highlight: ^0.7.0
+  flutter_math_fork: ^0.7.4
+  flutter_svg: ^2.5.0
+  webview_flutter: ^4.14.1
+  scrollable_positioned_list: ^0.3.8
+  nested: ^1.0.0
+  listen: ^1.0.1
+  tuple: ^2.0.2
+
+  # 系统能力
+  record: ^7.2.0
+  just_audio: ^0.10.6
+  audio_session: ^0.2.4
+  file_picker: ^13.4.0
+  share_plus: ^13.3.1
+  url_launcher: ^6.3.3
+  package_info_plus: ^10.2.2
+  cross_file: ^0.3.5+5
+  jni: ^1.2.1
+  jni_flutter: ^1.1.0
+  image_picker: ^1.2.4
+  # 「从相册选择」要显式打开 Android Photo Picker（image_picker 在 Android 13–15
+  # 默认走 ACTION_GET_CONTENT，会落到系统文件管理器），因此直接依赖这两个包。
+  image_picker_android: ^0.8.13
+  image_picker_platform_interface: ^2.11.2
+  permission_handler: 11.4.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+  flutter_lints: ^6.0.0
+  drift_dev: ^2.35.3
+  build_runner: ^2.17.1
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/web/
+
+  # 说明：KaTeX 字体由 flutter_math_fork 包自带（跟随其 package asset），
+  # MaterialIcons 由 uses-material-design 打开，无需在此声明。

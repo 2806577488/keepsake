@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 中文启动器显示名（原 APK 应用内中文名为「Keepsake（留声）」，标题栏另有「留声」）。 -->
+    <string name="app_name">留声</string>
+</resources>

@@ -1,0 +1,8 @@
+﻿<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <!-- Debug-only: allow HTTP so the app can talk to a local mock LLM server (10.0.2.2 / adb reverse). -->
+    <application
+        android:usesCleartextTraffic="true"
+        tools:replace="android:usesCleartextTraffic" />
+    <uses-permission android:name="android.permission.INTERNET" />
+</manifest>

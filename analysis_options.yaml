@@ -1,0 +1,32 @@
+# Keepsake（留声）— 静态分析配置
+#
+# 说明（重要，给所有批次）：
+# Flutter 3.50 把 framework 里的 Material 标记为 deprecated，建议改用独立包
+# `package:material_ui/material_ui.dart`。本项目**刻意**继续使用
+# `package:flutter/material.dart`，原因：
+#   1) 逆向证据：原 APK 的 libapp.so 里保留 `package:flutter/src/material/*`
+#      路径（scaffold.dart / app_bar.dart / text_button.dart …）→ 原工程用的就是
+#      framework 的 Material。
+#   2) 兼容性：`flutter_markdown`（`MarkdownStyleSheet.fromTheme(ThemeData)`）、
+#      `webview_flutter` 等依赖仍基于 framework 的 ThemeData；混用 material_ui
+#      会出现两套 Material 类型（ThemeData/Widget），编译期即冲突。
+# 因此这里只关掉这一条「建议迁移」性质的 lint 噪音，其余规则保持 flutter_lints 默认。
+include: package:flutter_lints/flutter.yaml
+
+analyzer:
+  errors:
+    # 见上文：framework Material 的「deprecated」提示，不许它污染 analyze 结果。
+    deprecated_member_use: ignore
+  exclude:
+    - "lib/**/*.g.dart"
+    - "lib/**/*.freezed.dart"
+    - build/**
+    - android/**
+    # 设计交接包里的代码是「摘录」，不是可编译单元（缺上下文、缺 import），
+    # 排除掉，别让它们进 analyze 结果。
+    - "docs/design-handoff/**"
+
+linter:
+  rules:
+    # 不额外收紧规则：保证 6 个批次并行产出的代码都能过 analyze。
+    avoid_print: false
