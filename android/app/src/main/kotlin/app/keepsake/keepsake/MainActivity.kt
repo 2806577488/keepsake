@@ -5,12 +5,15 @@ import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.provider.MediaStore
 import android.provider.OpenableColumns
 import android.provider.Settings
 import androidx.core.content.FileProvider
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
 
@@ -31,6 +34,16 @@ class MainActivity : FlutterActivity() {
 
     private val updateChannelName = "keepsake/update"
     private val galleryChannelName = "keepsake/gallery"
+
+    /**
+     * 更新通道的引用：`keepsake/update` 是**双向**的 ——
+     * Dart 调原生（installApk / applyPatch …），原生也通过它把差分合并进度
+     * 推回 Dart（`patchProgress`），所以要把通道对象存下来。
+     */
+    private var updateChannel: MethodChannel? = null
+
+    /** 原生侧线程（合并 APK）回到主线程再回结果/发进度。 */
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     /** 图库选择是异步的：先挂起 Flutter 侧的结果，等 onActivityResult 回来再回填。 */
     private var pendingGalleryResult: MethodChannel.Result? = null
@@ -92,8 +105,9 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, updateChannelName)
-            .setMethodCallHandler { call, result ->
+        val update = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, updateChannelName)
+        updateChannel = update
+        update.setMethodCallHandler { call, result ->
                 when (call.method) {
                     "canInstallPackages" -> result.success(canInstallPackages())
                     "openInstallSettings" -> openInstallSettings(result)
@@ -101,6 +115,13 @@ class MainActivity : FlutterActivity() {
                     // H4：安装被厂商安全策略拦时，Dart 侧要按厂商给中文引导，
                     // 而 Dart 侧没有 device_info_plus 依赖 → 由这里暴露 Build.MANUFACTURER。
                     "deviceManufacturer" -> result.success(Build.MANUFACTURER ?: "")
+                    // 分 ABI 挑包：Dart 侧同样没有 device_info_plus 依赖，
+                    // 拿不到 Build.SUPPORTED_ABIS，就由这里给。
+                    "supportedAbis" -> result.success(supportedAbis())
+                    // 差分更新：已安装 APK 的 sha256（用于在下载补丁前筛掉对不上的补丁）。
+                    "installedApkSha256" -> installedApkSha256(result)
+                    // 差分更新：把补丁套到已安装 APK 上，校验通过后返回新 APK 路径。
+                    "applyPatch" -> applyPatch(call, result)
                     else -> result.notImplemented()
                 }
             }
@@ -307,5 +328,120 @@ class MainActivity : FlutterActivity() {
             // FileProvider 路径不在 file_paths.xml 白名单内时也走这里（IllegalArgumentException）。
             result.error("INSTALL_FAILED", "打开安装器失败：${error.message}", null)
         }
+    }
+
+    // ---------------------------------------------------------------------
+    // 分 ABI 挑包 + 差分更新（patch 合并）
+    // ---------------------------------------------------------------------
+
+    /** 本机支持的全部 ABI，按优先级（`arm64-v8a` / `armeabi-v7a` …）。 */
+    private fun supportedAbis(): List<String> = try {
+        Build.SUPPORTED_ABIS?.toList() ?: emptyList()
+    } catch (error: Exception) {
+        emptyList()
+    }
+
+    /** 已安装 APK 的路径（`applicationInfo.sourceDir`）；拿不到时为 null。 */
+    private fun installedApkPath(): String? = try {
+        applicationInfo?.sourceDir
+    } catch (error: Exception) {
+        null
+    }
+
+    /** 已安装 APK 的 sha256：Dart 侧没加密库，用它来判断补丁能不能对上。 */
+    private fun installedApkSha256(result: MethodChannel.Result) {
+        val path = installedApkPath()
+        if (path.isNullOrBlank()) {
+            result.error("NO_SOURCE_DIR", "读不到已安装 APK 的路径", null)
+            return
+        }
+        runOnBackground(result) { BsPatch.sha256(File(path)) }
+    }
+
+    /**
+     * 差分合并：`已安装 APK + 补丁 → 新 APK`。
+     *
+     * 参数（`call.arguments`）：
+     * - `patch`：补丁绝对路径；
+     * - `outDir`：输出目录（Dart 侧的 `updates/`，在 FileProvider 白名单内）；
+     * - `outName`：输出文件名（如 `keepsake-0.4.21-arm64.apk`）；
+     * - `targetSha256`：**必填**，新 APK 的 sha256；不匹配就不产出可用文件；
+     * - `patchSha256`：可选，补丁文件自身的 sha256；
+     * - `fromSha256`：可选，已安装 APK 的 sha256（对不上说明补丁不是给这一版的）。
+     *
+     * 成功回传新 APK 的绝对路径（Dart 侧直接交给 installApk）。
+     * 任何失败都回 `PATCH_FAILED`（或 `IO_FAILED`），Dart 侧据此回退到完整包下载。
+     */
+    private fun applyPatch(call: MethodCall, result: MethodChannel.Result) {
+        val patchPath = call.argument<String>("patch")
+        val outDir = call.argument<String>("outDir")
+        val outName = call.argument<String>("outName") ?: "keepsake-patched.apk"
+        val targetSha = call.argument<String>("targetSha256")?.trim().orEmpty()
+        val patchSha = call.argument<String>("patchSha256")?.trim()?.takeIf { it.isNotEmpty() }
+        val fromSha = call.argument<String>("fromSha256")?.trim()?.takeIf { it.isNotEmpty() }
+
+        if (patchPath.isNullOrBlank()) {
+            result.error("BAD_ARGS", "补丁路径为空", null)
+            return
+        }
+        if (outDir.isNullOrBlank()) {
+            result.error("BAD_ARGS", "输出目录为空", null)
+            return
+        }
+        if (targetSha.length != 64) {
+            // 没有目标校验值就不能合并：宁可全量下载，也不装一个没法验证的包。
+            result.error("BAD_ARGS", "缺少新包的 sha256 校验值，拒绝合并", null)
+            return
+        }
+        val sourceDir = installedApkPath()
+        if (sourceDir.isNullOrBlank()) {
+            result.error("NO_SOURCE_DIR", "读不到已安装 APK 的路径", null)
+            return
+        }
+
+        val patchFile = File(patchPath)
+        val outFile = File(File(outDir), safeFileName(outName))
+        // 合并 40MB 级的包要几秒到十几秒，绝不能在主线程做。
+        runOnBackground(result) {
+            if (patchSha != null) {
+                val actualPatch = BsPatch.sha256(patchFile)
+                if (!actualPatch.equals(patchSha, ignoreCase = true)) {
+                    throw BsPatch.PatchException("补丁文件校验失败（sha256 不匹配），不会用来合并")
+                }
+            }
+            val oldApk = File(sourceDir)
+            if (fromSha != null) {
+                val actualFrom = BsPatch.sha256(oldApk)
+                if (!actualFrom.equals(fromSha, ignoreCase = true)) {
+                    throw BsPatch.PatchException("本机已安装的 APK 与该补丁对不上（不是同一次构建）")
+                }
+            }
+            BsPatch.apply(oldApk, patchFile, outFile, targetSha) { done, total ->
+                // 进度推回 Dart（MethodChannel 双向）；主线程回调。
+                mainHandler.post {
+                    updateChannel?.invokeMethod(
+                        "patchProgress",
+                        mapOf("done" to done, "total" to total),
+                    )
+                }
+            }
+            outFile.absolutePath
+        }
+    }
+
+    /** 后台线程跑 [block]，结果/异常都回主线程交给 [result]。 */
+    private fun <T> runOnBackground(result: MethodChannel.Result, block: () -> T) {
+        Thread {
+            try {
+                val value = block()
+                mainHandler.post { result.success(value) }
+            } catch (error: BsPatch.PatchException) {
+                mainHandler.post { result.error("PATCH_FAILED", error.message ?: "合并失败", null) }
+            } catch (error: Exception) {
+                mainHandler.post {
+                    result.error("IO_FAILED", error.message ?: "差分合并时发生未知错误", null)
+                }
+            }
+        }.start()
     }
 }

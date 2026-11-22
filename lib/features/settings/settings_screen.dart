@@ -989,6 +989,14 @@ class _UpdateTileState extends State<_UpdateTile> {
                     ),
                   ),
                 ],
+                if (info.patch != null) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    '本次支持差分更新：只下载 ${_size(info.patchDownloadSize)} 的变化部分，'
+                    '失败会自动改用完整安装包。',
+                    style: theme.textTheme.bodySmall?.copyWith(color: s.c.onV),
+                  ),
+                ],
                 if (info.apkUrl == null) ...[
                   const SizedBox(height: 8),
                   Text(
@@ -1087,8 +1095,14 @@ class _UpdateTileState extends State<_UpdateTile> {
     }
 
     try {
-      final file = await UpdateService.download(
+      // 优先差分补丁：UpdateService.update 内部在补丁不可用/合并失败时
+      // 自动回退到完整包下载，所以这里只按「一条链路」写 UI 就行。
+      final file = await UpdateService.update(
         info,
+        onStage: (stage) {
+          // 阶段文案（下载补丁 / 合并 / 回退全量）直接顶到进度框下面。
+          status.value = stage;
+        },
         onProgress: (received, total) {
           if (total > 0) {
             fraction.value = (received / total).clamp(0.0, 1.0);
@@ -1097,7 +1111,7 @@ class _UpdateTileState extends State<_UpdateTile> {
                 '（${(received * 100 / total).toStringAsFixed(0)}%）';
           } else {
             fraction.value = null;
-            status.value = '已下载 ${_size(received)}';
+            status.value = '已处理 ${_size(received)}';
           }
         },
       );
