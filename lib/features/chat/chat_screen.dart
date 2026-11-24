@@ -74,6 +74,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   final ItemScrollController _itemScrollController = ItemScrollController();
   final ItemPositionsListener _itemPositions = ItemPositionsListener.create();
 
+  /// 是否已经做过"进会话先贴底"的初始定位。
+  bool _didInitialPin = false;
+
   /// 是否自动跟随最新消息（用户往上翻时暂停）。
   final ValueNotifier<bool> _autoFollow = ValueNotifier<bool>(true);
 
@@ -122,13 +125,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   @override
   void initState() {
     super.initState();
-    _itemPositions.itemPositions.addListener(_onPositionsChanged);
     _input.addListener(_onInputChanged);
   }
 
   @override
   void dispose() {
-    _itemPositions.itemPositions.removeListener(_onPositionsChanged);
     _input.removeListener(_onInputChanged);
     _autoFollow.dispose();
     final hold = _hold;
@@ -180,63 +181,47 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   // 滚动
   // -------------------------------------------------------------------------
 
-  void _onPositionsChanged() {
-    final positions = _itemPositions.itemPositions.value;
-    if (positions.isEmpty) return;
-    var maxIndex = -1;
-    for (final position in positions) {
-      if (position.index > maxIndex) maxIndex = position.index;
+  /// 离底多少算"贴着底"：设计 §2.1 的 80dp。
+  static const double _followThreshold = 80;
+
+  /// 用户此刻是否贴着底（流式跟随只在贴底时生效）。
+  ///
+  /// 依据是滚动度量 `extentAfter`（到底还有多少距离），而不是"最后一条是否可见"：
+  /// 最后一条比视口高时它会一直可见，导致用户上滑也被当成在底部（不能上滑看内容）。
+  void _onMetricsChanged(ScrollMetrics metrics, {bool userDrag = false}) {
+    if (!metrics.hasContentDimensions) return;
+    final bool atBottom = metrics.extentAfter <= _followThreshold;
+    if (atBottom) {
+      if (!_autoFollow.value) _autoFollow.value = true;
+      return;
     }
-    final count = _state.messages.length;
-    final from = _windowFrom(count);
-    final listCount = count - from + (from > 0 ? 1 : 0);
-    final atBottom = listCount == 0 || maxIndex >= listCount - 1;
-    if (_autoFollow.value != atBottom) _autoFollow.value = atBottom;
+    // 只有**用户自己拖动**才停止跟随：SPL 的懒加载会让程序贴底后
+    // extentAfter 仍报一个估值，若按它判断，按钮会一直挂着（实测）。
+    if (userDrag && _autoFollow.value) _autoFollow.value = false;
   }
 
   void _onInputChanged() {
     if (mounted) setState(() {});
   }
 
-  /// 滚到指定消息（[_scrollToIndex]）。参数是消息下标，内部换算成窗口列表下标。
-  void _scrollToIndex(int index, {bool animate = true}) {
+  /// 滚到底（[_jumpToBottom]）。
+  void _jumpToBottom({bool animate = true}) {
+    _autoFollow.value = true;
+    if (!mounted || !_itemScrollController.isAttached) return;
     final count = _state.messages.length;
     if (count <= 0) return;
-    final target = index.clamp(0, count - 1);
-    var from = _windowFrom(count);
-    if (target < from) {
-      // 目标在窗口之前：先把窗口前移，再在下一帧跳过去。
-      setState(() => _windowStart = (target - 2).clamp(0, count));
-      from = _windowFrom(count);
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted || !_itemScrollController.isAttached) return;
-        _itemScrollController.jumpTo(
-          index: _listIndex(from, target),
-          alignment: 1,
-        );
-      });
-      return;
-    }
-    if (!_itemScrollController.isAttached) return;
-    final listIndex = _listIndex(from, target);
+    final from = _windowFrom(count);
+    final lastIndex = _listIndex(from, count - 1);
     if (animate) {
       _itemScrollController.scrollTo(
-        index: listIndex,
+        index: lastIndex,
         duration: const Duration(milliseconds: 220),
         curve: Curves.easeOutCubic,
         alignment: 1,
       );
     } else {
-      _itemScrollController.jumpTo(index: listIndex, alignment: 1);
+      _itemScrollController.jumpTo(index: lastIndex, alignment: 1);
     }
-  }
-
-  /// 滚到底（[_jumpToBottom]）。
-  void _jumpToBottom({bool animate = true}) {
-    _autoFollow.value = true;
-    final count = _state.messages.length;
-    if (count == 0) return;
-    _scrollToIndex(count - 1, animate: animate);
   }
 
   /// 「加载更早」：窗口前移一段，并保持当前首条消息在屏幕顶部的视觉位置。
@@ -255,20 +240,21 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     });
   }
 
-  /// 流式跟随的最小间隔：token 每一帧都到，但滚动不能每一帧都锚一次。
-  static const Duration _followInterval = Duration(milliseconds: 150);
+  /// 流式跟随的合并间隔（token 每帧都到，滚动不能每帧都锚一次）。
+  static const Duration _followInterval = Duration(milliseconds: 100);
 
   DateTime _lastFollowAt = DateTime.fromMillisecondsSinceEpoch(0);
 
-  /// 流式跟随：节流 + 短动画贴底。
+  /// 流式跟随：**只在用户贴着底时**把列表钉到底部。
   ///
-  /// 以前每个 token 都 `jumpTo(index: 最后一条, alignment: 1)`，把最后一条消息的
-  /// 底边硬钉到视口底边；而流式时这条消息的高度每一帧都在增长，等于每帧重新锚定
-  /// 一次，输出区（连同下方输入栏）就会持续上下跳。现在：
-  /// 1) 最多每 150ms 触发一次；
-  /// 2) 用 120ms 的短动画贴底，而不是瞬时跳；
-  /// 3) 用户上滑把 `_autoFollow` 置 false 后完全不跟随。
+  /// 2026-11-24 模拟器实测的两个问题都在这里：
+  /// 1) 以前用 120ms 的 `scrollTo` 动画，每 150ms 重起一次 → 输出区持续上下跳（抖动）；
+  ///    现在贴底时直接 `jumpTo`（无动画），文字高度增长由布局吸收，视觉上是"向上长"。
+  /// 2) 以前不管用户是否在底部都跟（判定还用了"最后一条可见"），上滑看思考/开头会被
+  ///    立刻拽回底部（"滑不动"）。现在 [ _autoFollow ] 由 `extentAfter` 决定，用户一旦
+  ///    离开底部就完全不跟随，只显示「回到底部」按钮。
   void _scheduleFollow() {
+    if (!_autoFollow.value) return;
     final now = DateTime.now();
     final wait = _followInterval - now.difference(_lastFollowAt);
     if (wait > Duration.zero) {
@@ -278,26 +264,33 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         _scrollScheduled = false;
         if (!mounted || !_autoFollow.value) return;
         _lastFollowAt = DateTime.now();
-        _followBottomSmooth();
+        _pinToBottom();
       });
       return;
     }
     _lastFollowAt = now;
-    _followBottomSmooth();
+    // 下一帧再钉：这一帧的内容高度还没算出来。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _autoFollow.value) _pinToBottom();
+    });
   }
 
-  /// 平滑贴到列表底部（只被 [_scheduleFollow] 与「回到底部」按钮共用）。
-  void _followBottomSmooth() {
+  /// 把列表钉到最底部（瞬时，无动画）。
+  ///
+  /// `ScrollablePositionedList` 是懒加载的，`maxScrollExtent` 只是估值，
+  /// 按偏移跳会停在中段；只能按条目对齐跳最后一条（alignment 1 = 底边贴视口底）。
+  void _pinToBottom() {
     if (!mounted || !_itemScrollController.isAttached) return;
     final count = _state.messages.length;
     if (count <= 0) return;
     final from = _windowFrom(count);
-    _itemScrollController.scrollTo(
+    _itemScrollController.jumpTo(
       index: _listIndex(from, count - 1),
-      duration: const Duration(milliseconds: 120),
-      curve: Curves.easeOut,
       alignment: 1,
     );
+    // 主动贴底后立即回到"跟随中"：SPL 的 jumpTo 不一定发滚动通知，
+    // 不置 true 的话「回到底部」按钮会一直挂在那儿。
+    _autoFollow.value = true;
   }
 
   // -------------------------------------------------------------------------
@@ -1128,6 +1121,15 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     final book = ref.watch(providerBookProvider);
     final theme = Theme.of(context);
 
+    // 进会话第一次拿到消息时贴到底部（之前靠"最后一条可见即算底部"顺带完成，
+    // 换成 extentAfter 判定后需要显式做一次，否则打开会话停在中段）。
+    if (!_didInitialPin && state.messages.isNotEmpty && !state.loading) {
+      _didInitialPin = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _pinToBottom();
+      });
+    }
+
     // 流式/新消息到达时自动跟随底部。
     ref.listen<ChatUiState>(chatControllerProvider(widget.sessionId), (
       ChatUiState? previous,
@@ -1229,38 +1231,32 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                 onDismiss: _controller.dismissError,
               ),
               if (state.uploading) const LinearProgressIndicator(minHeight: 2),
-              Expanded(
-                child: Stack(
-                  children: <Widget>[
-                    Positioned.fill(child: _buildMessageList(state)),
-                    Positioned(
-                      right: 12,
-                      bottom: 12,
-                      child: ValueListenableBuilder<bool>(
-                        valueListenable: _autoFollow,
-                        builder:
-                            (
-                              BuildContext context,
-                              bool autoFollow,
-                              Widget? child,
-                            ) {
-                              if (autoFollow || state.messages.isEmpty) {
-                                return const SizedBox.shrink();
-                              }
-                              final skin = KeepsakeSkinColors.of(context);
-                              return _ArrowButton(
-                                icon: skin.icon(
-                                  filled: Icons.keyboard_arrow_down,
-                                  outlined: Icons.keyboard_arrow_down,
-                                ),
-                                tooltip: '滚动到底',
-                                onPressed: _jumpToBottom,
-                              );
-                            },
+              Expanded(child: _buildMessageList(state)),
+              // 「回到底部」按钮：放在列表**外面**（列表与芯片之间，右对齐），
+              // 不再浮在消息上盖住最后一条气泡的文字（模拟器实测：它会压住
+              // 最后一条气泡右侧的半行字）。
+              ValueListenableBuilder<bool>(
+                valueListenable: _autoFollow,
+                builder: (BuildContext context, bool autoFollow, Widget? child) {
+                  if (autoFollow || state.messages.isEmpty) {
+                    return const SizedBox.shrink();
+                  }
+                  final skin = KeepsakeSkinColors.of(context);
+                  return Align(
+                    alignment: Alignment.centerRight,
+                    child: Padding(
+                      padding: const EdgeInsets.only(right: 12, bottom: 4),
+                      child: _ArrowButton(
+                        icon: skin.icon(
+                          filled: Icons.keyboard_arrow_down,
+                          outlined: Icons.keyboard_arrow_down,
+                        ),
+                        tooltip: '回到底部',
+                        onPressed: _jumpToBottom,
                       ),
                     ),
-                  ],
-                ),
+                  );
+                },
               ),
               _PendingChips(
                 attachments: state.pendingAttachments,
@@ -1343,23 +1339,40 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       child: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 720),
-          child: ScrollablePositionedList.builder(
-            itemCount: listCount,
-            itemScrollController: _itemScrollController,
-            itemPositionsListener: _itemPositions,
-            // 页面左右内边距 16（README §3）。
-            padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
-            itemBuilder: (BuildContext context, int index) {
-              if (hasEarlier && index == 0) {
-                return _EarlierMessagesButton(onTap: () => _loadEarlier(from));
-              }
-              final messageIndex = from + index - (hasEarlier ? 1 : 0);
-              final message = state.messages[messageIndex];
-              return KeyedSubtree(
-                key: ValueKey<String>(message.id),
-                child: _buildBubble(context, state, message, messageIndex),
-              );
+          // 「是不是贴着底」只认滚动度量（`extentAfter`），见 [_onMetricsChanged]。
+          child: NotificationListener<ScrollMetricsNotification>(
+            onNotification: (ScrollMetricsNotification n) {
+              _onMetricsChanged(n.metrics);
+              return false;
             },
+            child: NotificationListener<ScrollNotification>(
+              onNotification: (ScrollNotification n) {
+                final bool userDrag =
+                    n is ScrollUpdateNotification && n.dragDetails != null;
+                _onMetricsChanged(n.metrics, userDrag: userDrag);
+                return false;
+              },
+              child: ScrollablePositionedList.builder(
+                itemCount: listCount,
+                itemScrollController: _itemScrollController,
+                itemPositionsListener: _itemPositions,
+                // 页面左右内边距 16（README §3）。
+                padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+                itemBuilder: (BuildContext context, int index) {
+                  if (hasEarlier && index == 0) {
+                    return _EarlierMessagesButton(
+                      onTap: () => _loadEarlier(from),
+                    );
+                  }
+                  final messageIndex = from + index - (hasEarlier ? 1 : 0);
+                  final message = state.messages[messageIndex];
+                  return KeyedSubtree(
+                    key: ValueKey<String>(message.id),
+                    child: _buildBubble(context, state, message, messageIndex),
+                  );
+                },
+              ),
+            ),
           ),
         ),
       ),
@@ -1795,10 +1808,17 @@ class _MessageBubble extends StatelessWidget {
     );
 
     // 气泡宽 76% 封顶（README §4.3）：窄屏/折叠屏都按屏宽比例封顶。
+    final double bubbleMax = MediaQuery.sizeOf(context).width * 0.76;
+    // 流式中的助手气泡**锁宽**：文字从两三个字长到满宽时，气泡宽度若跟着内容走，
+    // 左边框和整段文字会横向来回蹭（实测"输出时抖动"的一半来源）。
+    // 结束后恢复按内容自适应（短回答仍是小气泡）。
+    final bool streamingAssistant = !isUser && message.streaming;
     final bubbleBlock = ConstrainedBox(
       constraints: BoxConstraints(
-        maxWidth: MediaQuery.sizeOf(context).width * 0.76,
-        minWidth: showStreamStatus ? 144 : 0,
+        maxWidth: bubbleMax,
+        minWidth: streamingAssistant
+            ? bubbleMax
+            : (showStreamStatus ? 144 : 0),
       ),
       child: bubble,
     );

@@ -118,6 +118,13 @@ android {
             } else {
                 signingConfigs.getByName("debug")
             }
+            // 不生成原生调试符号（`extractReleaseNativeSymbolTables`）。
+            // 为什么关：我们不往 Play Console 传符号；而这个任务在 Windows 上
+            // 偶发 `llvm-objcopy` 启动失败（本机 2026-11-24 出现过 3 次，
+            // 重试有时好有时不好），关掉后构建稳定且产物一样能装。
+            ndk {
+                debugSymbolLevel = "none"
+            }
         }
     }
 }
