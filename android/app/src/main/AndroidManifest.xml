@@ -5,13 +5,16 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
     <uses-permission android:name="android.permission.CAMERA"/>
-    <!-- M9：不再声明 READ_MEDIA_IMAGES。图库通道发的是 ACTION_PICK_IMAGES /
-         ACTION_GET_CONTENT / ACTION_PICK，返回带授权的 content:// 后立刻复制到
-         cacheDir，全程不做 MediaStore 列表查询，因此不需要读媒体权限；
-         留着它只会在部分 ROM 的「隐私」页多出一个「照片」项，让用户以为在偷读相册。
-         将来若要做自带相册网格（真的查 MediaStore），必须同时声明
-         READ_MEDIA_IMAGES + READ_MEDIA_VIDEO + READ_MEDIA_VISUAL_USER_SELECTED
-         三条并处理 Android 14 的「部分照片访问」。 -->
+    <!-- 相册（App 内网格）：现在真的会查 MediaStore 列表，所以必须声明读媒体权限。
+         - Android 13+：READ_MEDIA_IMAGES；
+         - Android 14+：再加 READ_MEDIA_VISUAL_USER_SELECTED，系统才会给
+           「全部允许 / 选择照片 / 不允许」三选，用户只给部分照片时列表就只
+           返回那几张（界面上会提示"仅显示已授权的照片"）。
+         - 只读图片，不读视频/音频，所以不声明 READ_MEDIA_VIDEO / AUDIO。
+         为什么终于需要它：系统选图 Intent（ACTION_GET_CONTENT 等）在国产 ROM
+         上会被文件管理器抢走，改成 App 内相册后必须自己查 MediaStore。 -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES"/>
+    <uses-permission android:name="android.permission.READ_MEDIA_VISUAL_USER_SELECTED"/>
     <!-- Android 12 及以下（API ≤ 32）用旧的分区存储权限；image_picker 拍完照
          写缓存时在个别 ROM 上仍会查这一条，保留但封顶到 32。 -->
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32"/>
@@ -52,6 +55,17 @@
             <data android:scheme="content"/>
             <data android:mimeType="image/*"/>
         </intent>
+        <!-- 图库探测：用 GET_CONTENT(image/*) 找"能看图"的应用，再把文件管理器扣掉 -->
+        <intent>
+            <action android:name="android.intent.action.GET_CONTENT"/>
+            <data android:mimeType="image/*"/>
+        </intent>
+        <!-- 图库探测：OPEN_DOCUMENT(image/*) 的响应者就是"文件管理器/文档选择器"，
+             拿它当黑名单，保证「从相册选择」永远不会落到 DocumentsUI / 文件管理 -->
+        <intent>
+            <action android:name="android.intent.action.OPEN_DOCUMENT"/>
+            <data android:mimeType="image/*"/>
+        </intent>
         <!-- 应用内更新：系统安装器（Android 7+ 走 FileProvider 的 content://） -->
         <intent>
             <action android:name="android.intent.action.VIEW"/>
@@ -65,6 +79,10 @@
         </intent>
     </queries>
 
+    <!-- requestLegacyExternalStorage：只在 Android 10（API 29）生效，11+ 被忽略。
+         相册网格拿 MediaStore 的 DATA 列当本地路径直接用 `File` 读，而 Android 10
+         的分区存储默认会把"其他 App 的媒体文件路径"挡掉（EACCES）；打开这个开关
+         让 29 上退回旧行为，31+ 本来就用 READ_MEDIA_* + 路径直读，不受影响。 -->
     <application
         android:label="@string/app_name"
         android:name="${applicationName}"
@@ -72,6 +90,7 @@
         android:usesCleartextTraffic="false"
         android:allowBackup="false"
         android:fullBackupContent="false"
+        android:requestLegacyExternalStorage="true"
         android:enableOnBackInvokedCallback="true">
         <!-- L2：allowBackup=false —— 换机助手/云备份只会搬走 DB 而搬不走附件，
              恢复后会出现「会话在、图片全丢」的假完整状态，所以干脆不参与备份

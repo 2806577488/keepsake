@@ -29,7 +29,6 @@ import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/chat/attachments.dart' show AttachmentRules;
-import '../../core/chat/gallery_picker.dart';
 import '../../core/chat/image_util.dart' show imageSizeOf;
 import '../../core/providers.dart';
 // 为什么：chip 的图标 15 / 字号 12 只在 token 层有常量，页面里写死会和三套皮肤脱节。
@@ -47,6 +46,7 @@ import '../settings/settings_screen.dart';
 import 'chat_controller.dart';
 import 'session_usage_bar.dart';
 import 'voice_button.dart';
+import 'gallery/gallery_page.dart';
 import 'widgets/markdown_view.dart';
 
 /// 聊天页（从会话列表进入；[sessionId] 必须已存在）。
@@ -502,17 +502,34 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     await _pickImages();
   }
 
-  /// 直接用系统图库（原生 `keepsake/gallery` 通道）。
+  /// 相册入口：**App 内微信式相册**（`gallery/gallery_page.dart` +
+  /// `keepsake/media` 原生通道）。
   ///
-  /// 不走 image_picker：华为等没有 AOSP Photo Picker 的设备上，它会回退到
-  /// 文件管理器（DocumentsUI 的「最近」）。原生侧的回退顺序是
-  /// `ACTION_PICK_IMAGES` → `ACTION_GET_CONTENT`（可多选）→ `ACTION_PICK`，
-  /// 打开的都是「图库」界面；返回的已经是复制到缓存的本地路径。
+  /// 为什么不再走系统选图 Intent（`ACTION_PICK_IMAGES / GET_CONTENT / PICK`）：
+  /// 国产 ROM 上 `ACTION_GET_CONTENT` 同时被「图库」和「文件管理」注册，
+  /// 系统按默认应用/上次选择直接进文件管理器（DocumentsUI 的「最近」）。
+  /// 连续几个版本都在调 Intent 顺序和 `<queries>`，但只要还是隐式 Intent，
+  /// 进哪个界面就由 ROM 决定 —— 所以主路径改成自己画相册（网格 / 分类 /
+  /// 预览 / 编辑全在 App 内），系统里根本没有"另一个 App"可跳。
+  ///
+  /// 系统图库仍然保留在原生侧（`GalleryTargets.kt`），只作为「相册权限被拒」
+  /// 时的兜底出口，且只允许启动真正的图库 Activity，文件管理器一律排除。
   Future<void> _pickImages() async {
-    if (_picking) return; // 防连点：上一次还在等系统图库
+    if (_picking) return; // 防连点：上一次还在等相册/系统图库
+    final int room = AttachmentRules.remainingSlots(
+      _state.pendingAttachments.length,
+    );
+    if (room <= 0) {
+      _toast(AttachmentRules.tooManyMessage);
+      return;
+    }
     setState(() => _picking = true);
     try {
-      final List<String> paths = await GalleryPicker.pickImages();
+      // 相册一次最多 9 张（与微信一致），再受"还能加几个附件"约束。
+      final List<String> paths = await showGalleryPage(
+        context,
+        maxCount: room < 9 ? room : 9,
+      );
       for (final String path in paths) {
         try {
           await _addXFile(XFile(path));
@@ -521,18 +538,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
           _toast('有一张图片读不出来：$error');
         }
       }
-    } on PlatformException catch (error) {
-      if (error.code == 'PICK_TIMEOUT') {
-        // M10：选图期间进程被系统回收 → 通道永不返回，90s 超时兜底。
-        _toast('上次选图被系统中断了，请再选一次');
-      } else if (error.code == 'BUSY') {
-        _toast('上一次选图还没结束，稍等一下再点');
-      } else {
-        _toast('打开图库失败：${error.message ?? error.code}');
-      }
     } catch (error) {
-      // 原生返回的本地路径可能已失效（缓存被系统清掉），XFile.length() 会抛
-      // FileSystemException —— 这里必须兜住，否则就是未处理异常（M2）。
+      // 相册原图可能已被删除、App 私有目录可能被清理 —— 兜住，别变未处理异常。
       _toast('读取图片失败：$error');
     } finally {
       if (mounted) setState(() => _picking = false);

@@ -20,20 +20,24 @@ import java.io.File
 /**
  * Keepsake 主 Activity。
  *
- * 除 Flutter 默认行为，额外提供两条通道：
+ * 除 Flutter 默认行为，额外提供三条通道：
  * - `keepsake/update`：应用内更新（安装未知来源权限 / 安装 APK）；
- * - `keepsake/gallery`：直接用系统图库选图。
- *   `image_picker` 在华为等没有 AOSP Photo Picker 的设备上会回退到文件管理器
- *   （DocumentsUI 的「最近」界面），所以这里自己发 Intent，顺序为
- *   `ACTION_PICK_IMAGES`（Android 13+）→ `ACTION_GET_CONTENT`（可多选，
- *   华为系打开的就是厂商图库）→ `ACTION_PICK`（老式相册，单张语义兜底）。
+ * - `keepsake/gallery`：**备选**路径 —— 系统图库选图。国产 ROM 上隐式
+ *   Intent 会被文件管理器抢走（`ACTION_GET_CONTENT` 同时被图库与文件管理
+ *   注册），所以这里改成"先问系统谁是真图库，再用 `setPackage` 定向启动"，
+ *   文件管理器一律排除；一个都没有时回 `NEED_IN_APP_GALLERY`，由 App 内
+ *   相册网格兜底（见 `keepsake/media`）；
+ * - `keepsake/media`：本机相册列表（App 内网格用，只读 MediaStore，不发
+ *   Intent，因此不可能跳到文件管理器）。
  *
- * 对应 Dart 侧：lib/core/update/update_service.dart、lib/core/chat/gallery_picker.dart。
+ * 对应 Dart 侧：lib/core/update/update_service.dart、
+ * lib/core/chat/gallery_picker.dart、lib/core/chat/media_gallery.dart。
  */
 class MainActivity : FlutterActivity() {
 
     private val updateChannelName = "keepsake/update"
     private val galleryChannelName = "keepsake/gallery"
+    private val mediaChannelName = "keepsake/media"
 
     /**
      * 更新通道的引用：`keepsake/update` 是**双向**的 ——
@@ -50,6 +54,12 @@ class MainActivity : FlutterActivity() {
 
     /** 图库选图用的 requestCode（与 Flutter 插件用的区间错开）。 */
     private val galleryRequestCode = 0x4b01
+
+    /** 相册权限申请的 requestCode（与图库的错开）。 */
+    private val mediaPermissionRequestCode = 0x4b02
+
+    /** 相册权限申请的挂起结果：运行时权限是异步的，要等 onRequestPermissionsResult。 */
+    private var pendingMediaPermission: MethodChannel.Result? = null
 
     /** Photo Picker 一次最多选几张（与 Dart 侧附件上限无关，只约束系统图库）。 */
     private val maxPickedImages = 9
@@ -103,6 +113,27 @@ class MainActivity : FlutterActivity() {
         pending.success(copied)
     }
 
+    /**
+     * 相册权限的回填。
+     *
+     * `grantResults` 在"系统直接取消/被打断"时可能是空数组，所以不按它判断
+     * 结果，而是重新查一次真实授权状态（Android 14 的「部分照片」也能正确
+     * 落成 PARTIAL）。
+     */
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray,
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode != mediaPermissionRequestCode) return
+        val pending = pendingMediaPermission ?: return
+        pendingMediaPermission = null
+        mainHandler.post {
+            pending.success(MediaLibrary.access(this) != MediaAccess.NONE)
+        }
+    }
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         val update = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, updateChannelName)
@@ -132,6 +163,81 @@ class MainActivity : FlutterActivity() {
                     else -> result.notImplemented()
                 }
             }
+        // App 内相册网格：只读 MediaStore，不发任何选图 Intent。
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, mediaChannelName)
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "access" -> result.success(MediaLibrary.access(this).wireName)
+                    "request" -> requestMediaPermission(result)
+                    "list" -> listMediaImages(call, result)
+                    "buckets" -> listMediaBuckets(result)
+                    else -> result.notImplemented()
+                }
+            }
+    }
+
+    // ---------------------------------------------------------------------
+    // App 内相册（MediaStore）
+    // ---------------------------------------------------------------------
+
+    /** 申请「照片和视频」权限；回填 true 表示至少拿到了"部分照片"访问。 */
+    private fun requestMediaPermission(result: MethodChannel.Result) {
+        if (MediaLibrary.access(this) != MediaAccess.NONE) {
+            result.success(true)
+            return
+        }
+        if (pendingMediaPermission != null) {
+            result.error("BUSY", "上一次权限申请还没结束", null)
+            return
+        }
+        pendingMediaPermission = result
+        try {
+            requestPermissions(MediaLibrary.permissions(), mediaPermissionRequestCode)
+        } catch (error: Exception) {
+            pendingMediaPermission = null
+            result.error("REQUEST_FAILED", error.message ?: "申请相册权限失败", null)
+        }
+    }
+
+    /** 读一页相册图片（后台线程 + 回主线程回结果）。 */
+    private fun listMediaImages(call: MethodCall, result: MethodChannel.Result) {
+        if (MediaLibrary.access(this) == MediaAccess.NONE) {
+            // 没授权时查询必然失败（Android 10+ 还可能是 SecurityException）：
+            // 先给明确错误码，让 Dart 侧显示"允许访问照片"而不是一个空网格。
+            result.error("NO_PERMISSION", "还没有「照片和视频」权限", null)
+            return
+        }
+        val offset = (call.argument<Int>("offset") ?: 0).coerceAtLeast(0)
+        val limit = (call.argument<Int>("limit") ?: 60).coerceIn(1, 500)
+        val bucketId = call.argument<String>("bucketId")
+        Thread {
+            try {
+                val images = MediaLibrary.list(this, offset, limit, bucketId)
+                mainHandler.post { result.success(images) }
+            } catch (error: Exception) {
+                mainHandler.post {
+                    result.error("LIST_FAILED", error.message ?: "读取相册失败", null)
+                }
+            }
+        }.start()
+    }
+
+    /** 读相册分类（微信式顶部「全部图片 ▾」）。 */
+    private fun listMediaBuckets(result: MethodChannel.Result) {
+        if (MediaLibrary.access(this) == MediaAccess.NONE) {
+            result.error("NO_PERMISSION", "还没有「照片和视频」权限", null)
+            return
+        }
+        Thread {
+            try {
+                val buckets = MediaLibrary.buckets(this)
+                mainHandler.post { result.success(buckets) }
+            } catch (error: Exception) {
+                mainHandler.post {
+                    result.error("LIST_FAILED", error.message ?: "读取相册分类失败", null)
+                }
+            }
+        }.start()
     }
 
     // ---------------------------------------------------------------------
@@ -145,38 +251,42 @@ class MainActivity : FlutterActivity() {
         }
         pendingGalleryResult = result
 
-        // 回退顺序（H2）：PICK_IMAGES → GET_CONTENT → PICK，每级独立 try/catch。
-        // 全部直接 start、不用 resolveActivity 做门禁——Android 11+ 包可见性过滤
-        // 会把「明明有应用」误判成 null（H1 的根因）。
-        //
-        // 1) Android 13+ 系统图片选择器（Photo Picker）：可多选、不需要读相册权限。
+        // 1) Android 13+ 的系统 Photo Picker（AOSP MediaProvider / 带 GMS 的机型）。
+        //    先确认它的响应者不是文件管理器 —— 极少数 ROM 会把这个 action 接到
+        //    文档界面上，那种情况宁可不走这一步。
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             val picker = Intent(MediaStore.ACTION_PICK_IMAGES).apply {
                 type = "image/*"
                 putExtra(MediaStore.EXTRA_PICK_IMAGES_MAX, maxPickedImages)
             }
-            if (tryLaunchGallery(picker)) return
+            val usablePicker = try {
+                GalleryTargets.resolvesOutsideDocuments(this, picker)
+            } catch (error: Exception) {
+                false
+            }
+            if (usablePicker && tryLaunchGallery(picker)) return
         }
 
-        // 2) 华为/荣耀没有系统 Photo Picker：ACTION_GET_CONTENT 在华为系 ROM 上
-        //    打开的是「图库」而不是文件管理器（AOSP 上才直落 DocumentsUI），
-        //    且支持多选 → 比 ACTION_PICK（单张语义）更靠前。
-        val open = Intent(Intent.ACTION_GET_CONTENT).apply {
-            type = "image/*"
-            addCategory(Intent.CATEGORY_OPENABLE)
-            putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+        // 2) 厂商图库：`GalleryTargets.discover` 已经排除了文件管理器 / 文档选择器，
+        //    这里逐个 `setPackage(图库包名)` 定向启动 —— 定向是唯一能保证
+        //    "不会因为默认应用而进文件管理器"的做法。
+        val targets = try {
+            GalleryTargets.discover(this)
+        } catch (error: Exception) {
+            emptyList<GalleryTarget>()
         }
-        if (tryLaunchGallery(open)) return
-
-        // 3) 老式相册选择：保证至少能进厂商图库。部分 ROM 只回第一张，
-        //    onActivityResult 里已经按 clipData 优先、data 兜底读取。
-        val pick = Intent(Intent.ACTION_PICK, MediaStore.Images.Media.EXTERNAL_CONTENT_URI).apply {
-            putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+        for (target in targets) {
+            if (tryLaunchGallery(target.intent)) return
         }
-        if (tryLaunchGallery(pick)) return
 
+        // 3) 一个真图库都找不到：**绝不**退回文件管理器（用户点的是「相册」），
+        //    交给 Dart 侧留在 App 内相册里选。
         pendingGalleryResult = null
-        result.error("NO_GALLERY", "这台设备没有可用的图库选择器", null)
+        result.error(
+            "NEED_IN_APP_GALLERY",
+            "这台设备没有可用的系统图库（只剩文件管理器），请用 App 内相册",
+            null,
+        )
     }
 
     /** 尝试启动一个选图 Intent；系统里没有对应 Activity 时返回 false（继续回退）。 */
