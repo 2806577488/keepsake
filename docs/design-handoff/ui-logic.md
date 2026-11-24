@@ -219,7 +219,9 @@
 | 上下文 | 「上下文：不限制」或「上下文：最近 20 轮」 | 永远不带选中态（不是开关，是设置） | 改上下文预算（填 0 = 不限制） | — | — |
 | 添加附件 | 「添加附件」 | 不带选中态 | 打开附件菜单（拍照/从相册/选文件） | — | 图标 50% 透明 + tooltip 说明「暂不支持附件，请改成发文字」 |
 
-芯片视觉：高 36 行内滚动，胶囊圆角 14、内边距 10 / 6、图标 13、文字 `labelSmall`；选中 = `primaryContainer` 底 + `primary` 40% 描边 + w600；未选中 = `surfaceContainerLow` 底 + `outlineVariant` 描边。
+芯片视觉（v3.1 定稿，与设计库 `SPEC.md` §4.8 一致）：高 **32**、左右内距 **12**、圆角 `rChip`、图标 **15**、文字 **12**；开态 = `primaryContainer` 底 + `onPrimaryContainer` 字 + 皮肤标题字重；关态 = **透明**底 + 1px `outlineVariant` 描边 + `onSurfaceVariant` 字。触摸框 48（上下各 8），但**底色只画在 32 的本体上**，触点框本身不着色。
+
+**按压态（v3.1 新增，别退回 Material 默认）**：关态按下时芯片本体底 = `surfaceContainerHigh`，过渡 120 ms；开态按下保持 `primaryContainer`（不加深）。**禁止** Material 默认的 `highlightColor` 与 `InkSparkle/InkRipple` 水波纹 —— 它们按 **48dp 触点框**铺一层深色，比 32 的本体大一圈，点一下就是「灰色遮罩闪一下」。工程落地：`InkWell(splashFactory: NoSplash.splashFactory, splashColor: Colors.transparent, highlightColor: Colors.transparent, onHighlightChanged: …)`，背景自己按 `_pressed` 在 `transparent` / `high` 之间切。
 
 > ⚠️ **深度思考 / 思考强度 / 上下文预算都是「会话级」**：芯片显示的是**当前生效值**（会话覆盖 ?? 全局默认），改它不会写回设置页。设置页里那三项只是**新会话的默认值**。这条是产品约束，视觉改版不能把它变成全局开关。
 

@@ -730,76 +730,101 @@ class _ComposerTools extends StatelessWidget {
 }
 
 /// 单个工具 chip（[_ToolChip]）。
-class _ToolChip extends StatelessWidget {
+///
+/// v3.1 同步：按压态自绘（关态 `hover` 档底 = `skin.c.high`，120 ms），
+/// 关掉 Material 的 `highlight` / 水波纹 —— 否则会在 48dp 触点框上铺一层灰，
+/// 比 32dp 的芯片本体大一圈，看起来就是「点一下闪一块灰」。
+class _ToolChip extends StatefulWidget {
   const _ToolChip({
     required this.label,
     required this.icon,
-    required this.selected,
     required this.onTap,
     this.onLongPress,
+    this.selected = false,
     this.disabled = false,
     this.tooltip,
-    this.tint,
   });
 
   final String label;
   final IconData icon;
-  final bool selected;
   final VoidCallback onTap;
   final VoidCallback? onLongPress;
+  final bool selected;
   final bool disabled;
   final String? tooltip;
-  final Color? tint;
+
+  @override
+  State<_ToolChip> createState() => _ToolChipState();
+}
+
+class _ToolChipState extends State<_ToolChip> {
+  bool _pressed = false;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    final foreground =
-        tint ??
-        (disabled
-            ? scheme.onSurfaceVariant.withValues(alpha: 0.5)
-            : selected
-            ? scheme.onPrimaryContainer
-            : scheme.onSurfaceVariant);
-    final background = selected
-        ? scheme.primaryContainer
-        : scheme.surfaceContainerLow;
+    final skin = KeepsakeSkinColors.of(context);
+    final foreground = widget.disabled
+        ? skin.c.onV.withValues(alpha: 0.5)
+        : widget.selected
+        ? skin.c.onPC
+        : skin.c.onV;
+    // 按压态只换本体底色，不碰触点框（48dp 那一圈永远不着色）。
+    final background = widget.selected
+        ? skin.c.pC
+        : _pressed
+        ? skin.c.high
+        : Colors.transparent;
     final chip = Padding(
       padding: const EdgeInsets.only(right: 6),
       child: InkWell(
-        onTap: disabled ? null : onTap,
-        onLongPress: disabled ? null : onLongPress,
-        borderRadius: BorderRadius.circular(14),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-          decoration: BoxDecoration(
-            color: background,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(
-              color: selected
-                  ? scheme.primary.withValues(alpha: 0.4)
-                  : scheme.outlineVariant,
-            ),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: <Widget>[
-              Icon(icon, size: 13, color: foreground),
-              const SizedBox(width: 4),
-              Text(
-                label,
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: foreground,
-                  fontWeight: selected ? FontWeight.w600 : null,
+        onTap: widget.disabled ? null : widget.onTap,
+        onLongPress: widget.disabled ? null : widget.onLongPress,
+        borderRadius: skin.rChip,
+        splashFactory: NoSplash.splashFactory,
+        splashColor: Colors.transparent,
+        highlightColor: Colors.transparent,
+        onHighlightChanged: (bool pressed) {
+          if (_pressed == pressed) return;
+          setState(() => _pressed = pressed);
+        },
+        child: SizedBox(
+          height: 48,
+          child: Center(
+            child: Container(
+              height: KeepsakeTheme.chipHeight,
+              padding: const EdgeInsets.symmetric(
+                horizontal: KeepsakeTheme.chipPadH,
+              ),
+              decoration: BoxDecoration(
+                color: background,
+                borderRadius: skin.rChip,
+                border: Border.all(
+                  width: 1,
+                  color: widget.selected ? Colors.transparent : skin.c.ov,
                 ),
               ),
-            ],
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  Icon(widget.icon, size: kChipIconSize, color: foreground),
+                  const SizedBox(width: 6),
+                  Text(
+                    widget.label,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      fontSize: kChipFontSize,
+                      color: foreground,
+                      fontWeight: widget.selected ? skin.titleWeight : null,
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
         ),
       ),
     );
-    final text = tooltip;
+    final text = widget.tooltip;
     return text == null ? chip : Tooltip(message: text, child: chip);
   }
 }

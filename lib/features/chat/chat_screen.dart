@@ -2855,7 +2855,7 @@ class _ComposerTools extends StatelessWidget {
 ///
 /// 视觉：高 32 / 左右内距 12 / 圆角 rChip / 图标 15 / 文字 12（SPEC §4.4）；
 /// 点击区撑到 48（§3 触摸区下限）；开态只换底色与字色，文字不会位移。
-class _ToolChip extends StatelessWidget {
+class _ToolChip extends StatefulWidget {
   const _ToolChip({
     required this.label,
     required this.icon,
@@ -2877,23 +2877,46 @@ class _ToolChip extends StatelessWidget {
   final String? tooltip;
 
   @override
+  State<_ToolChip> createState() => _ToolChipState();
+}
+
+class _ToolChipState extends State<_ToolChip> {
+  /// 是否正被按下（用来替代 Material 的灰色 highlight）。
+  bool _pressed = false;
+
+  @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     // 为什么：开态底 pC + 字 onPC；关态透明底 + 1px ov 描边 + 字 onV（SPEC §4.4）。
     final skin = KeepsakeSkinColors.of(context);
-    final foreground = disabled
+    final foreground = widget.disabled
         ? skin.c.onV.withValues(alpha: 0.5)
-        : selected
+        : widget.selected
         ? skin.c.onPC
         : skin.c.onV;
-    final background = selected ? skin.c.pC : Colors.transparent;
+    // 为什么按下态自己画：Material 的 highlight 会在**整个 48dp 触点框**上铺一层
+    // 深色（主题里是 onPC 8%），而那圈比 32dp 的芯片本体大一圈 —— 点一下就是
+    // 「灰色遮罩闪一下」。改成按下时让芯片本体浮一点（surface.high），
+    // 并且把 splashFactory 换成 NoSplash，触点框里不会再出现任何矩形灰块。
+    final background = widget.selected
+        ? skin.c.pC
+        : _pressed
+        ? skin.c.high
+        : Colors.transparent;
     final chip = Padding(
       // 芯片间距 6（README §4.4）。
       padding: const EdgeInsets.only(right: 6),
       child: InkWell(
-        onTap: disabled ? null : onTap,
-        onLongPress: disabled ? null : onLongPress,
+        onTap: widget.disabled ? null : widget.onTap,
+        onLongPress: widget.disabled ? null : widget.onLongPress,
         borderRadius: skin.rChip,
+        splashFactory: NoSplash.splashFactory,
+        splashColor: Colors.transparent,
+        highlightColor: Colors.transparent,
+        onHighlightChanged: (bool pressed) {
+          if (_pressed == pressed) return;
+          setState(() => _pressed = pressed);
+        },
         child: SizedBox(
           // 触达高度 48（README §3），芯片本体 32（§4.4）。
           height: 48,
@@ -2909,21 +2932,21 @@ class _ToolChip extends StatelessWidget {
                 // 为什么：透明底必须靠 1px 描边定边界；开态用透明占位保持 1px 不位移。
                 border: Border.all(
                   width: 1,
-                  color: selected ? Colors.transparent : skin.c.ov,
+                  color: widget.selected ? Colors.transparent : skin.c.ov,
                 ),
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: <Widget>[
-                  Icon(icon, size: kChipIconSize, color: foreground),
+                  Icon(widget.icon, size: kChipIconSize, color: foreground),
                   const SizedBox(width: 6),
                   Text(
-                    label,
+                    widget.label,
                     style: theme.textTheme.bodyMedium?.copyWith(
                       fontSize: kChipFontSize,
                       color: foreground,
                       // 为什么：开态用皮肤标题字重（H 700 / A 600 / E 700）。
-                      fontWeight: selected ? skin.titleWeight : null,
+                      fontWeight: widget.selected ? skin.titleWeight : null,
                     ),
                   ),
                 ],
@@ -2933,7 +2956,7 @@ class _ToolChip extends StatelessWidget {
         ),
       ),
     );
-    final text = tooltip;
+    final text = widget.tooltip;
     return text == null ? chip : Tooltip(message: text, child: chip);
   }
 }

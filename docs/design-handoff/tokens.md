@@ -186,6 +186,9 @@ Material 3 默认排版，代码**只覆盖了 `bodyMedium` 和 `bodyLarge` 的�
 | 代码块「已复制」回弹 | 2 s 后复位 | `_CodeBlockState` |
 | 导入批量写库的让出间隔 | 300 ms / 批次 | `core/import/import_task.dart` |
 | 批量删除的让出节奏 | 每 8 条让一次事件循环 | `sessions_screen._deleteSelected` |
+| **工具芯片按压态**（v3.1） | 120 ms，`high` 底 ↔ 透明底 | `chat_screen._ToolChip` |
+
+> **按压态的总规矩（v3.1 起）**：可点的元素只允许用「底色档位（`surface` → `low` → `high`）」或透明度表达按下；**不允许** Material 默认的灰色 `highlightColor` / 水波纹。原因：Ink 是按**触摸框**（48dp）画的，而视觉本体只有 32dp，那一圈多出来的灰色矩形在浅色皮肤上非常显眼，用户看到的就是「点一下闪一块灰」。芯片类组件一律 `splashFactory: NoSplash.splashFactory` + 自绘按压底。
 
 没有自定义 `Curve`（全用默认 `Curves.easeInOut` 系）。没有页面转场定制，全走 `MaterialPageRoute` 默认。
 
