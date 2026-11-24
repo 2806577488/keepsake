@@ -1332,13 +1332,19 @@ class ChatController extends Notifier<ChatUiState> {
     ];
 
     // ---- 自带大脑：人格/情绪 + 工作记忆召回（失败静默，退化成普通聊天）----
-    // 顺序：默认 system（含摘要）→ 人格/情绪 → 相关回忆；超预算时优先砍回忆。
+    //
+    // 关键：**注入内容必须放在最后一个 user 轮里，不能拼进 system**。
+    // DeepSeek / OpenAI 的上下文缓存是「前缀缓存」——system 在消息最前面，
+    // 每轮变化（心情、召回的旧片段带日期）会让整段前缀全部失效：
+    // 实测缓存命中率只有 18%–34%（2026-11-24，模拟器）。历史那条链是稳定的，
+    // 所以把易变内容挂到「最后一轮 user」开头，前面 system + 历史都能命中。
     var systemContent = context.system?.content ?? settings.resolvedSystemPrompt;
     // 旧轮次被裁掉时告诉模型「更早的还在长期记忆里」，避免它以为对话从最近开始。
+    // 这里**故意不写轮数**：写「更早的 N 轮」会让 N 一变 system 就变，又是缓存杀手。
     if (context.droppedCount > 0 && !systemContent.contains('已存入长期记忆')) {
-      systemContent =
-          '$systemContent\n\n【更早的 ${context.droppedCount} 轮对话已存入长期记忆，需要时可检索】';
+      systemContent = '$systemContent\n\n【更早的对话已存入长期记忆，需要时可检索】';
     }
+    var injectionText = '';
     try {
       // 角色卡：情绪 / 人格 / 记忆只读写当前会话绑定的角色（没有就按需建默认卡）。
       final character = await CharacterService(ref.read(databaseProvider))
@@ -1357,16 +1363,29 @@ class ChatController extends Notifier<ChatUiState> {
             ),
             baseSystemChars: systemContent.length,
           );
-      if (!injection.isEmpty) {
-        systemContent = '$systemContent\n\n${injection.text}';
-      }
+      if (!injection.isEmpty) injectionText = injection.text;
     } catch (_) {
       // 大脑不可用时不影响对话：用原来的 system prompt。
     }
 
+    // 把易变注入挂到最后一轮 user 的开头（有注入才动，没注入时消息序列与原来一致）。
+    List<ChatTurn> messages = context.messages;
+    if (injectionText.trim().isNotEmpty) {
+      final mutable = List<ChatTurn>.of(messages);
+      for (var i = mutable.length - 1; i >= 0; i--) {
+        if (!mutable[i].isUser) continue;
+        mutable[i] = ChatTurn(
+          role: mutable[i].role,
+          content: '${injectionText.trim()}\n\n${mutable[i].content}',
+        );
+        break;
+      }
+      messages = List<ChatTurn>.unmodifiable(mutable);
+    }
+
     return ChatRequest(
       provider: provider,
-      messages: context.messages,
+      messages: messages,
       systemPrompt: systemContent,
       model: model,
       thinking: _thinkingEnabled && provider.supportsThinking,

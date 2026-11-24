@@ -119,13 +119,24 @@ class UsageTotals {
 
   /// 缓存命中率（0..1）。
   ///
-  /// 分母用 `inputTokens + cacheReadInputTokens`：Anthropic 的 `input_tokens`
-  /// 不含缓存命中部分；OpenAI 的 `prompt_tokens` 含缓存命中部分，此口径会略偏低，
-  /// 但两种供应商都能给出稳定的 0..1 值（统计页只做展示）。
+  /// 分母**必须按供应商口径分开算**（2026-11-24 实测发现旧公式让 DeepSeek 的数字凭
+  /// 空矮一截）：
+  /// - OpenAI / DeepSeek：`prompt_tokens` **已包含**命中部分（实测 DeepSeek 一次
+  ///   521 prompt / 384 hit → 命中率 74%），分母就是 `inputTokens`；
+  /// - Anthropic：`input_tokens` **不含**缓存读/写，分母要加回来。
+  /// 判别方式：Anthropic 会报 `cache_creation_input_tokens`；OpenAI 兼容接口没有这个
+  /// 字段（DeepSeek 只有 `prompt_cache_hit_tokens` / cached_tokens）。
   double get cacheHitRate {
-    final base = inputTokens + cacheReadInputTokens;
+    final int read = cacheReadInputTokens;
+    if (read <= 0) return 0;
+    final int base;
+    if (cacheCreationInputTokens > 0) {
+      base = inputTokens + read + cacheCreationInputTokens;
+    } else {
+      base = inputTokens > 0 ? inputTokens : read;
+    }
     if (base <= 0) return 0;
-    final rate = cacheReadInputTokens / base;
+    final rate = read / base;
     if (rate.isNaN || rate.isInfinite) return 0;
     return rate.clamp(0.0, 1.0).toDouble();
   }
@@ -295,6 +306,11 @@ UsageDelta? parseUsage(Map<String, Object?>? json) {
     if (details is Map) {
       cacheRead = _intOf(details['cached_tokens']) ?? 0;
     }
+  }
+  // DeepSeek 的 OpenAI 兼容接口在 usage 顶层直接给命中数（`prompt_cache_hit_tokens`）；
+  // 有的版本没有 `prompt_tokens_details`，不读这个字段命中率会一直是 0。
+  if (cacheRead <= 0) {
+    cacheRead = _intOf(source['prompt_cache_hit_tokens']) ?? 0;
   }
 
   if (input == null && output == null && cacheRead <= 0 && cacheCreation <= 0) {
