@@ -4,7 +4,7 @@ publish_to: 'none'
 
 # 版本号：发版 tag 必须与这里的 version 一致（0.4.26 → tag v0.4.26）；
 # versionName / versionCode 由 flutter build 从这一行自动写入，不要手改产物。
-version: 0.4.26+4260
+version: 0.4.27+4270
 
 environment:
   sdk: ^3.14.0
