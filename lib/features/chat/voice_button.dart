@@ -22,6 +22,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/providers.dart';
+import '../../core/ui/toast.dart' show showTopToast;
 import '../../core/voice/tts_client.dart';
 import '../../core/voice/voice_error.dart';
 import '../../core/voice/voice_guards.dart';
@@ -110,8 +111,8 @@ class _SpeakButtonState extends ConsumerState<SpeakButton> {
       handler(message);
       return;
     }
-    final messenger = ScaffoldMessenger.maybeOf(context);
-    messenger?.showSnackBar(SnackBar(content: Text(message)));
+    // 没有外部回调时也走顶部浮层：底部 SnackBar 会压住输入栏（同聊天页）。
+    if (mounted) showTopToast(context, message);
   }
 
   /// 播放 / 停止切换（符号表 `_toggle`）。
@@ -319,8 +320,8 @@ class _HoldToTalkButtonState extends ConsumerState<HoldToTalkButton>
       handler(message);
       return;
     }
-    final messenger = ScaffoldMessenger.maybeOf(context);
-    messenger?.showSnackBar(SnackBar(content: Text(message)));
+    // 同上：没有外部回调时也走顶部浮层，别压住输入区。
+    if (mounted) showTopToast(context, message);
   }
 
   /// 按下：做门禁检查后开始录音。

@@ -15,6 +15,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 
 import '../../../core/chat/media_gallery.dart';
+import '../../../core/ui/toast.dart' show showTopToast;
 import 'image_editor_page.dart';
 
 /// 预览页回传结果。
@@ -86,9 +87,8 @@ class _GalleryPreviewPageState extends State<GalleryPreviewPage> {
 
   void _notify(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(content: Text(message)));
+    // 顶部浮层：黑底预览页底部那一条是「编辑 / 勾选 / 发送」，不能被提示盖住。
+    showTopToast(context, message);
   }
 
   void _toggleCurrent() {

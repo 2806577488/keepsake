@@ -29,6 +29,7 @@ import 'package:flutter/services.dart';
 import '../../../core/chat/gallery_picker.dart' show GalleryPicker;
 import '../../../core/chat/media_gallery.dart';
 import '../../../core/theme.dart';
+import '../../../core/ui/toast.dart' show showTopToast;
 import 'gallery_preview_page.dart';
 
 /// 打开相册选择页；返回选中图片的**本地路径**（已复制到 App 私有目录）。
@@ -384,9 +385,8 @@ class _GalleryPageState extends State<GalleryPage> {
 
   void _notify(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(content: Text(message)));
+    // 顶部浮层：底部 SnackBar 会压住「预览 / 发送」那一条。
+    showTopToast(context, message);
   }
 
   // -------------------------------------------------------------------------

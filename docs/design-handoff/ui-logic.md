@@ -293,6 +293,24 @@
 | 模型选择弹层 | `_ModelSheet`（`chat_screen.dart:1265`） |
 | 语音 | `core/voice/*`（`VoiceHoldState` / `VoicePhase`） |
 
+### 2.14 轻提示（toast）
+
+聊天页所有 `_toast(...)` 一律走 **顶部浮层**（`lib/core/ui/toast.dart` 的 `showTopToast`），不是底部 SnackBar。
+
+| 项 | 规格（与设计库 SPEC §4.9 一致） |
+| --- | --- |
+| 位置 | 状态栏 + AppBar(56) + 8；左右 16；水平居中；最大宽 480 |
+| 层级 | Overlay 浮层，**不参与布局**（出现时页面不位移） |
+| 底色 / 字色 | `inverseSurface` / `onInverseSurface`；圆角 `rCard`；内边距 16 / 12 |
+| 文字 | 14，单行优先 |
+| 时长 | 2s；出现 120ms 淡入 + 8dp 上移；同屏只留一条（新的顶掉旧的） |
+| 交互 | `IgnorePointer`：不拦输入、滚动、点按 |
+| 禁止 | 底部 SnackBar（聊天页会压住输入栏 + 工具芯片；相册页压住「预览/发送」；编辑器压住工具条） |
+
+> 迁移状态（2026-11-24）：聊天页（含语音控件）、相册页 / 预览页 / 图片编辑器已改；
+> 设置页与会话列表还留着底部 SnackBar（那里没有输入区，暂不影响使用），
+> 后续随改动一并迁移到 `showTopToast`。
+
 ---
 
 ## 3. 设置页

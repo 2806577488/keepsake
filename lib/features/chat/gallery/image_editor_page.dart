@@ -19,6 +19,8 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 
+import '../../../core/ui/toast.dart' show showTopToast;
+
 /// 裁剪框最小边长 = 图片显示区域短边的 20%，并有 48dp 的绝对值下限。
 /// （再小的话四角命中区会互相重叠，手指根本捏不住。）
 const double _kMinCropRatio = 0.2;
@@ -160,9 +162,11 @@ class _ImageEditorPageState extends State<ImageEditorPage> {
   }
 
   /// 轻提示（烘焙失败等非致命错误）。
+  ///
+  /// 走顶部浮层：编辑器底部是「旋转 / 镜像 / 重置」工具条，底部 SnackBar 会盖上去。
   void _showTip(String message) {
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(message)));
+    if (!mounted) return;
+    showTopToast(context, message);
   }
 
   /// 顺时针旋转 90°。

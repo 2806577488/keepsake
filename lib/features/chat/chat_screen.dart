@@ -35,6 +35,7 @@ import '../../core/providers.dart';
 import '../../core/skin_tokens.dart' show kChipFontSize, kChipIconSize;
 import '../../core/theme.dart'
     show KeepsakeSkinColors, KeepsakeTheme;
+import '../../core/ui/toast.dart' show showTopToast;
 import '../../core/usage/usage.dart' show occupancyPercent;
 import '../../core/usage/usage_store.dart'
     show SessionUsage, usageStoreProvider;
@@ -146,13 +147,14 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   // 小工具（符号表方法名）
   // -------------------------------------------------------------------------
 
-  /// 轻提示（SnackBar）。
+  /// 轻提示：**顶部浮层**（`core/ui/toast.dart`）。
+  ///
+  /// 为什么不用 SnackBar：它只能贴 Scaffold 底部，而聊天页底部就是输入栏 +
+  /// 工具芯片，弹出来会盖住用户正在看/正在点的地方（"思考：开（中）"糊在
+  /// 输入框上那种）。顶部浮层不遮输入区，也不拦手势。
   void _toast(String message) {
     if (!mounted) return;
-    final messenger = ScaffoldMessenger.maybeOf(context);
-    messenger?.showSnackBar(
-      SnackBar(content: Text(message), duration: const Duration(seconds: 2)),
-    );
+    showTopToast(context, message);
   }
 
   /// 平台简称（AppBar 副标题用）：`DeepSeek（官方）` → `DeepSeek`。

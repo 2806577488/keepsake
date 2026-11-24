@@ -146,8 +146,8 @@ App 内相册"。
 ```
 build/app/outputs/flutter-apk/app-release.apk
   32,975,316 字节 · versionCode 4260 / 0.4.26 · 签名 = debug（与现有发布包一致，可覆盖安装）
-  sha256 5e37680e846c506f19ae49ddc5afd6d2e6d9db725669c9d1d61595782a2af0ae
-  本包同时包含后续的 chip 按压态修复（工具芯片不再闪灰块，见 commit fix(chip)）
+  sha256 1455cc2b961bd4ed45ce86a29c15f34c5e1d58e72772fd0452dfc24497a435ea
+  本包同时包含后续改动：chip 按压态（不再闪灰块）+ 轻提示移到顶部浮层
   只带 lib/arm64-v8a/libflutter.so（arm64 机型直接装；32 位机请用 build-abis.cmd 出包）
 ```
 
