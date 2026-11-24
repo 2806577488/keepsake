@@ -36,7 +36,8 @@ import 'package:keepsake/core/chat/blocks.dart';
 import 'package:keepsake/core/export/exporter.dart';
 import 'package:keepsake/core/import/import_task.dart';
 import 'package:keepsake/core/providers.dart';
-import 'package:keepsake/core/skin_tokens.dart' show kSelectionBarWidth;
+import 'package:keepsake/core/skin_tokens.dart'
+    show kFabLineColor, kSelectionBarWidth;
 import 'package:keepsake/core/theme.dart';
 import 'package:keepsake/core/usage/usage_store.dart';
 import 'package:keepsake/features/chat/chat_screen.dart';
@@ -1109,7 +1110,7 @@ class _SessionAvatar extends StatelessWidget {
 }
 
 /// 新对话按钮（README §4.1、§7）：高 56、左右 20、圆角按皮肤 rFab、
-/// `pC` 实心零描边、无投影。
+/// `pC` 实心 + **1px `kFabLineColor` 描边**（v3.5 定稿，零阴影下描边是唯一层级手段）、无投影。
 class _NewSessionFab extends StatelessWidget {
   const _NewSessionFab({required this.creating, required this.onTap});
 
@@ -1125,9 +1126,10 @@ class _NewSessionFab extends StatelessWidget {
         height: KeepsakeTheme.fabHeight,
         padding: const EdgeInsets.symmetric(horizontal: 20),
         decoration: BoxDecoration(
-          // FAB 改成 pC 实心 + 零描边（旧 fabBorder 已从 token 层删除）。
           color: skin.c.pC,
           borderRadius: skin.rFab,
+          // v3.5：补回 1px 描边（设计库 `--fab-line` = #8CCDBB）。
+          border: Border.all(color: kFabLineColor),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,

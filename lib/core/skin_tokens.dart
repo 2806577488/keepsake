@@ -92,6 +92,10 @@ const List<String> kSerifFontFallback = <String>[
 /// seed 主色（v1.1 基线，M3 派生用）。
 const Color kSeedColor = Color(0xFF2F6B5F);
 
+/// FAB 的 1px 描边色（设计库 `--fab-line`，v3.5 定稿：pC 底 + 这条描边；
+/// 零阴影下描边是 FAB 唯一的层级手段，不能省）。
+const Color kFabLineColor = Color(0xFF8CCDBB);
+
 // ---------------------------------------------------------------------------
 // 图标风格
 // ---------------------------------------------------------------------------
@@ -220,8 +224,9 @@ class SkinColors {
     onPC: Color(0xFF005045),
     sendBg: Color(0xFFA0F2DF),
     sendFg: Color(0xFF005045),
-    aiBg: Color(0xFFA0F2DF),
-    aiFg: Color(0xFF005045),
+    // v3.5：AI 气泡改 surfaceContainerLow（原先与用户气泡同色，真机分不清谁说的）。
+    aiBg: Color(0xFFEFF5F2),
+    aiFg: Color(0xFF191C1B),
     avBg: Color(0xFFDEE4E1),
     avFg: Color(0xFF496F66),
     errC: Color(0xFFBA1A1A),
@@ -251,8 +256,9 @@ class SkinColors {
     onPC: Color(0xFF5A2E14),
     sendBg: Color(0xFFB4481B),
     sendFg: Color(0xFFFFFFFF),
-    aiBg: Color(0xFFA0F2DF),
-    aiFg: Color(0xFF005045),
+    // v3.5：E 的 AI 气泡从冷薄荷改纸色（= E 的 low）。
+    aiBg: Color(0xFFF1EDE4),
+    aiFg: Color(0xFF1A1A18),
     avBg: Color(0xFFDEE4E1),
     avFg: Color(0xFF496F66),
     errC: Color(0xFFBA1A1A),
@@ -282,8 +288,9 @@ class SkinColors {
     onPC: Color(0xFF005045),
     sendBg: Color(0xFF1F4A42),
     sendFg: Color(0xFFA7E6D5),
-    aiBg: Color(0xFF1F4A42),
-    aiFg: Color(0xFFA7E6D5),
+    // v3.5：H 的 AI 气泡改 surfaceContainerLow（原先与用户气泡同为深青）。
+    aiBg: Color(0xFFEFF5F2),
+    aiFg: Color(0xFF191C1B),
     avBg: Color(0xFF1F4A42),
     avFg: Color(0xFFA7E6D5),
     errC: Color(0xFFBA1A1A),
@@ -315,8 +322,9 @@ class SkinColors {
     onPC: Color(0xFF005045),
     sendBg: Color(0xFFA0F2DF),
     sendFg: Color(0xFF005045),
-    aiBg: Color(0xFFA0F2DF),
-    aiFg: Color(0xFF005045),
+    // 深色下 AI 气泡同样用 low 底（= 深色 low）。
+    aiBg: Color(0xFF161D1A),
+    aiFg: Color(0xFFE6EFEA),
     avBg: Color(0xFF8CCDBB),
     avFg: Color(0xFF062019),
     errC: Color(0xFFFFB4AB),
@@ -346,8 +354,8 @@ class SkinColors {
     onPC: Color(0xFF5A2E14),
     sendBg: Color(0xFFB4481B),
     sendFg: Color(0xFFFFFFFF),
-    aiBg: Color(0xFFA0F2DF),
-    aiFg: Color(0xFF005045),
+    aiBg: Color(0xFF1D1A16),
+    aiFg: Color(0xFFF2EDE4),
     avBg: Color(0xFF8CCDBB),
     avFg: Color(0xFF062019),
     errC: Color(0xFFFFB4AB),
@@ -377,8 +385,8 @@ class SkinColors {
     onPC: Color(0xFF005045),
     sendBg: Color(0xFF8FD6C5),
     sendFg: Color(0xFF062019),
-    aiBg: Color(0xFF8FD6C5),
-    aiFg: Color(0xFF062019),
+    aiBg: Color(0xFF161D1A),
+    aiFg: Color(0xFFE6EFEA),
     avBg: Color(0xFF8FD6C5),
     avFg: Color(0xFF062019),
     errC: Color(0xFFFFB4AB),
@@ -533,7 +541,8 @@ class SkinMorph {
     titleLSEm: 0.01,
     iconSize: 24,
     iconMood: IconMood.outlined,
-    avatarRadius: 0,
+    // v3.5：头像统一圆形（17 = 34 的一半）。原先 E 写 0，做出来是方角。
+    avatarRadius: 17,
     cardBorderWidth: 1,
     fontFamily: kSerifFontFamily,
     fontFamilyFallback: kSerifFontFallback,

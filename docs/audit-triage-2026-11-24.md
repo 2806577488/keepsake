@@ -97,10 +97,10 @@ E-03（版本/哈希手写）根因没消除：仍是手写文档，没有从构
 | E-06 | ✅ | `sessions/delete_task.dart:54-58`：单事务失败即整体回滚，注释明确"绝不能退回逐条删除" |
 | E-07 | ❌ | `chat_controller.dart:1834` 仍是 60ms 定时全量通知；`markdown_view.dart:1164` 代码块高亮仍在 build 里跑，无"流式单色"开关 |
 | E-08 | ❌ | `chat_controller.dart:551` 仍 `autoDispose`；`:1122-1126` 先写 `content: ''` 的 ASSISTANT；`_onDispose` 只 cancel |
-| E-09 | ⚖️ | `skin_tokens.dart:219/223` A 的 `pC` 与 `aiBg` 都是 `#A0F2DF`；等 D-17 |
+| E-09 | ✅ 已修（v3.5 裁决后） | A/H 的 `aiBg` 改 `low`、`aiFg` 改 `onS`；E 改纸色 `#F1EDE4`；用户/AI 气泡不再同色 |
 | E-10 | 不成立（规范外） | 见 §六：当前设计交接 `ui-logic.md:158` 明确写「更多菜单只有『设置』一项……刻意保持极简，不要往这里加按钮」；会话列表的 ⋮ 菜单代码里已有（`sessions_screen.dart:515-566`）。审计引用的「v3.3 §2.4」不在两个仓库里 |
 | E-11 | ✅ | `_SessionUsageGate`（`chat_screen.dart:1219`） |
-| E-12 | ⚖️ | `sessions_screen.dart:1114-1117`：「pC 实心 + 零描边」，注释说旧 `fabBorder` 已从 token 删；等 D-30 |
+| E-12 | ✅ 已修（v3.5 裁决后） | `sessions_screen.dart` `_NewSessionFab`：`pC` 底 + 1px `kFabLineColor`（#8CCDBB）描边；DESIGN SPEC §4.5 同步改为同一口径 |
 
 ### C. 中
 
@@ -132,7 +132,7 @@ E-03（版本/哈希手写）根因没消除：仍是手写文档，没有从构
 | E-36 | ✅ 已修（2026-11-24） | `chat_screen.dart` AppBar `titleSpacing: 8 → 4`（SPEC §4.1） |
 | E-37 | ❌ | `theme.dart:607-613` 引用块 decoration；`markdown_view.dart:717-719` |
 | E-38 | ⏳ 未复核 | 朗读项图标↔文字间距未核 |
-| E-39 | ❌ ⚖️ | `skin_tokens.dart:536` E 的 `avatarRadius: 0`（A/H 17）；等 D-05 |
+| E-39 | ✅ 已修（v3.5） | `skin_tokens.dart` E 的 `avatarRadius: 0 → 17`（圆形，与 A/H 一致） |
 | E-40 | ❌（低） | `mermaid_block.dart:333` `Color(0x00000000)` |
 | E-41 | ✅ 已修（2026-11-24） | `pubspec.yaml` 版本注释改为"tag 必须与本行一致"；`kSelectionBarWidth` 改为**真正被引用**（选中竖条 `width: kSelectionBarWidth`），不再是死常量 |
 | E-42 | ✅ 不复现 | 今天 `flutter analyze`（13 条历史告警）**退出码 0** |
