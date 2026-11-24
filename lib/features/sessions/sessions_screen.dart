@@ -44,6 +44,7 @@ import 'package:keepsake/features/chat/chat_screen.dart';
 import 'package:keepsake/features/sessions/delete_task.dart';
 import 'package:keepsake/features/sessions/sessions_providers.dart';
 import 'package:keepsake/features/settings/settings_screen.dart';
+import '../../core/ui/toast.dart';
 
 /// 会话列表首页。
 class SessionsScreen extends ConsumerStatefulWidget {
@@ -587,12 +588,7 @@ class _SessionsScreenState extends ConsumerState<SessionsScreen> {
   }
 
   void _toast(String message) {
-    final messenger = ScaffoldMessenger.maybeOf(context);
-    messenger
-      ?..hideCurrentSnackBar()
-      ..showSnackBar(
-        SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
-      );
+    showTopToast(context, message);
   }
 
   // -------------------------------------------------------------------------
@@ -1333,12 +1329,7 @@ class _ImportProgressBannerState extends ConsumerState<_ImportProgressBanner> {
   }
 
   void _toast(String message) {
-    final messenger = ScaffoldMessenger.maybeOf(context);
-    messenger
-      ?..hideCurrentSnackBar()
-      ..showSnackBar(
-        SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
-      );
+    showTopToast(context, message);
   }
 }
 

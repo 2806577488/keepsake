@@ -14,6 +14,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:keepsake/core/usage/usage.dart';
 import 'package:keepsake/core/usage/usage_store.dart';
+import '../../core/ui/toast.dart';
 
 /// 「用量统计」行（全局累计）。
 class TotalUsageTile extends ConsumerStatefulWidget {
@@ -65,12 +66,7 @@ class _TotalUsageTileState extends ConsumerState<TotalUsageTile> {
   }
 
   void _toast(String message) {
-    final messenger = ScaffoldMessenger.maybeOf(context);
-    messenger
-      ?..hideCurrentSnackBar()
-      ..showSnackBar(
-        SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
-      );
+    showTopToast(context, message);
   }
 
   @override

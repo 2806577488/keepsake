@@ -10,6 +10,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:keepsake/core/characters/character_service.dart';
 import 'package:keepsake/core/db/database.dart';
 import 'package:keepsake/core/providers.dart';
+import '../../core/ui/toast.dart';
 
 /// 设置 → 角色卡。
 class CharactersScreen extends ConsumerStatefulWidget {
@@ -35,9 +36,7 @@ class _CharactersScreenState extends ConsumerState<CharactersScreen> {
   }
 
   void _toast(String message) {
-    ScaffoldMessenger.maybeOf(context)
-      ?..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(content: Text(message)));
+    showTopToast(context, message);
   }
 
   Future<void> _create() async {

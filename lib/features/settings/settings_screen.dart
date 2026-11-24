@@ -47,6 +47,7 @@ import 'package:keepsake/features/settings/characters_screen.dart';
 import 'package:keepsake/features/settings/provider_section.dart';
 import 'package:keepsake/features/settings/usage_section.dart';
 import 'package:keepsake/features/settings/usage_total_tile.dart';
+import '../../core/ui/toast.dart';
 
 /// 设置页。
 class SettingsScreen extends ConsumerStatefulWidget {
@@ -389,12 +390,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 
   void _toast(String message) {
-    final messenger = ScaffoldMessenger.maybeOf(context);
-    messenger
-      ?..hideCurrentSnackBar()
-      ..showSnackBar(
-        SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
-      );
+    showTopToast(context, message);
   }
 
   // -------------------------------------------------------------------------
@@ -1251,12 +1247,7 @@ class _UpdateTileState extends State<_UpdateTile> {
   }
 
   void _toast(String message) {
-    final messenger = ScaffoldMessenger.maybeOf(context);
-    messenger
-      ?..hideCurrentSnackBar()
-      ..showSnackBar(
-        SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
-      );
+    showTopToast(context, message);
   }
 
   /// 发布说明给用户看的版本：去掉 Markdown 标记和技术性段落。

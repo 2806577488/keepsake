@@ -18,6 +18,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:keepsake/core/providers.dart';
+import '../../core/ui/toast.dart';
 
 /// 「AI 平台」分区：平台列表 + 当前平台选择 + 新增/编辑/删除入口。
 class ProviderSection extends ConsumerWidget {
@@ -389,12 +390,7 @@ class _ProviderEditSheetState extends ConsumerState<ProviderEditSheet> {
   }
 
   void _toast(String message) {
-    final messenger = ScaffoldMessenger.maybeOf(context);
-    messenger
-      ?..hideCurrentSnackBar()
-      ..showSnackBar(
-        SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
-      );
+    showTopToast(context, message);
   }
 
   // -------------------------------------------------------------------------

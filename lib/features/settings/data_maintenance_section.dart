@@ -26,6 +26,7 @@ import 'package:keepsake/core/characters/card_cleanup_task.dart';
 import 'package:keepsake/core/characters/character_service.dart';
 import 'package:keepsake/core/providers.dart';
 import 'package:keepsake/core/theme.dart';
+import '../../core/ui/toast.dart';
 
 // ---------------------------------------------------------------------------
 // 数量（设置页 watch 的 FutureProvider）
@@ -81,12 +82,7 @@ class _DataMaintenanceSectionState extends ConsumerState<DataMaintenanceSection>
   bool _cleaning = false;
 
   void _toast(String message) {
-    final messenger = ScaffoldMessenger.maybeOf(context);
-    messenger
-      ?..hideCurrentSnackBar()
-      ..showSnackBar(
-        SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
-      );
+    showTopToast(context, message);
   }
 
   /// 补建缺卡会话：交给全局 [cardBackfillProvider]，逐条让出事件循环。

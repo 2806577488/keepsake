@@ -17,6 +17,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:keepsake/core/providers.dart';
 import 'package:keepsake/core/usage/balance_store.dart';
 import 'package:keepsake/core/usage/usage_store.dart';
+import '../../core/ui/toast.dart';
 import 'package:keepsake/features/settings/balance_screen.dart';
 import 'package:keepsake/features/settings/session_usage_screen.dart';
 
@@ -224,11 +225,7 @@ String formatContextWindow(int tokens) {
   return '$tokens';
 }
 
+/// 轻提示：统一走顶部浮层（SPEC §4.9「提示统一挪到顶部」），不用 SnackBar。
 void _toast(BuildContext context, String message) {
-  final messenger = ScaffoldMessenger.maybeOf(context);
-  messenger
-    ?..hideCurrentSnackBar()
-    ..showSnackBar(
-      SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
-    );
+  showTopToast(context, message);
 }

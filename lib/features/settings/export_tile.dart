@@ -14,6 +14,7 @@ import 'package:share_plus/share_plus.dart';
 
 import 'package:keepsake/core/export/exporter.dart';
 import 'package:keepsake/core/providers.dart';
+import '../../core/ui/toast.dart';
 
 /// 「导出备份」行。
 class ExportBackupTile extends ConsumerStatefulWidget {
@@ -27,12 +28,7 @@ class _ExportBackupTileState extends ConsumerState<ExportBackupTile> {
   bool _exporting = false;
 
   void _toast(String message) {
-    final messenger = ScaffoldMessenger.maybeOf(context);
-    messenger
-      ?..hideCurrentSnackBar()
-      ..showSnackBar(
-        SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
-      );
+    showTopToast(context, message);
   }
 
   /// 导出全部会话为 ZIP 并唤起分享。

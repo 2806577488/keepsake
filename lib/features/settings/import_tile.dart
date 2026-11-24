@@ -32,6 +32,7 @@ import 'package:keepsake/core/import/import_task.dart';
 import 'package:keepsake/core/providers.dart';
 import 'package:keepsake/core/theme.dart';
 import 'package:keepsake/features/settings/permission_card.dart';
+import '../../core/ui/toast.dart';
 
 /// 是否是看起来像 DeepSeek 导出 ZIP 的下载链接。
 bool _looksLikeExportUrl(String raw) {
@@ -97,12 +98,7 @@ class _ImportHistoryTileState extends ConsumerState<ImportHistoryTile> {
   }
 
   void _toast(String message) {
-    final messenger = ScaffoldMessenger.maybeOf(context);
-    messenger
-      ?..hideCurrentSnackBar()
-      ..showSnackBar(
-        SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
-      );
+    showTopToast(context, message);
   }
 
   /// 入口：优先识别剪贴板里的下载链接，否则让用户选「本地 ZIP / 下载链接」。

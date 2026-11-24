@@ -12,6 +12,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:keepsake/core/usage/balance_client.dart';
 import 'package:keepsake/core/usage/balance_store.dart';
+import '../../core/ui/toast.dart';
 
 /// 「账户余额」明细页面。
 class BalanceScreen extends ConsumerStatefulWidget {
@@ -66,12 +67,7 @@ class _BalanceScreenState extends ConsumerState<BalanceScreen> {
   }
 
   void _toast(String message) {
-    final messenger = ScaffoldMessenger.maybeOf(context);
-    messenger
-      ?..hideCurrentSnackBar()
-      ..showSnackBar(
-        SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
-      );
+    showTopToast(context, message);
   }
 
   @override
