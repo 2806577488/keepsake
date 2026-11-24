@@ -36,6 +36,7 @@ import 'package:keepsake/core/chat/blocks.dart';
 import 'package:keepsake/core/export/exporter.dart';
 import 'package:keepsake/core/import/import_task.dart';
 import 'package:keepsake/core/providers.dart';
+import 'package:keepsake/core/skin_tokens.dart' show kSelectionBarWidth;
 import 'package:keepsake/core/theme.dart';
 import 'package:keepsake/core/usage/usage_store.dart';
 import 'package:keepsake/features/chat/chat_screen.dart';
@@ -340,6 +341,13 @@ class _SessionsScreenState extends ConsumerState<SessionsScreen> {
           session.characterId!,
     };
 
+    // 后台已经有删除任务在跑：这一次不会接单（`start` 会直接返回 0），
+    // 所以不能再提示「已开始删除」——那是在骗用户（E-28）。
+    if (ref.read(deleteTaskProvider).running) {
+      _toast('正在删除会话，请稍候再试');
+      return;
+    }
+
     // 乐观删除：列表里立刻隐藏，再交给后台任务慢慢删。
     setState(() => _pendingDeleteIds.addAll(ids));
     // 确认即交给后台任务：立刻退出多选，删除在后台跑完。
@@ -353,7 +361,9 @@ class _SessionsScreenState extends ConsumerState<SessionsScreen> {
             if (!mounted) return;
             setState(() => _pendingDeleteIds.removeAll(ids));
             ref.invalidate(sessionsProvider);
-            _toast('已删除 $removed 个会话');
+            // removed == 0 只可能是事务回滚（要么全删、要么全不删），
+            // 不能说成「已删除 0 个」，要给明确的失败出口。
+            _toast(removed == 0 ? '删除失败：没有删掉任何会话，已整体回滚' : '已删除 $removed 个会话');
           }),
     );
   }
@@ -964,15 +974,16 @@ class _SessionRow extends StatelessWidget {
           height: KeepsakeTheme.listRowHeight,
           child: Stack(
             children: <Widget>[
-              // 选中竖条 2px（拍板稿定稿宽度 2），颜色 s.selectionBar，
-              // 用 Positioned 覆盖在左内边距上，不占布局宽度。
+              // 选中竖条：宽度走 `kSelectionBarWidth`（当前 2dp；规范与设计稿对
+              // 2 / 3dp 仍有分歧，见 docs/audit-triage-2026-11-24.md E-16，定稿后
+              // 只改常量这一处）。用 Positioned 覆盖在左内边距上，不占布局宽度。
               if (selected)
                 Positioned(
                   left: 0,
                   top: 0,
                   bottom: 0,
                   child: Container(
-                    width: 2,
+                    width: kSelectionBarWidth,
                     color: skin.selectionBar,
                   ),
                 ),

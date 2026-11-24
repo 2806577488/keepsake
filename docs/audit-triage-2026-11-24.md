@@ -121,7 +121,7 @@ E-03（版本/哈希手写）根因没消除：仍是手写文档，没有从构
 | E-25 | ⏳ 未复核 | `database.dart` onUpgrade 的 catch 未逐行看 |
 | E-26 | ❌ | `core/api/sse.dart` 无行/事件长度上限 |
 | E-27 | 部分 | CRC 已校验（`zip_reader.dart:307`）、非 UTF-8 已回退（`:363`、`:549-554`）；背压/半截文件未核 |
-| E-28 | ❌ | `delete_task.dart:41` 运行中直接 `return 0`；`sessions_screen.dart:347` 仍无条件 toast「已开始删除」 |
+| E-28 | ✅ 已修（2026-11-24） | 后台已在删时先 `return` 并提示「正在删除会话，请稍候再试」；事务回滚时提示「删除失败…已整体回滚」（`sessions_screen.dart` `_deleteSelected`） |
 | E-29 | ✅ | `import_task.dart:143`「正在导入 x / y」 |
 | E-30 | ✅ | `provider_section.dart:560` 转圈 + `:377/379` 成功/失败 toast |
 | E-31 | ❌ ⚖️ | `chat_screen.dart:2840` 仍是 `'$n 轮'`；设计要求「上下文 · 最近 20 轮」 |
@@ -129,12 +129,12 @@ E-03（版本/哈希手写）根因没消除：仍是手写文档，没有从构
 | E-33 | ⏳ 需真机 | — |
 | E-34 | ✅ | `import_tile.dart:381`「确认导入历史对话？」 |
 | E-35 | ✅ | `chat_screen.dart:982/3204`「发消息…」 |
-| E-36 | ❌ | `chat_screen.dart:1146` `titleSpacing: 8`（规范 4） |
+| E-36 | ✅ 已修（2026-11-24） | `chat_screen.dart` AppBar `titleSpacing: 8 → 4`（SPEC §4.1） |
 | E-37 | ❌ | `theme.dart:607-613` 引用块 decoration；`markdown_view.dart:717-719` |
 | E-38 | ⏳ 未复核 | 朗读项图标↔文字间距未核 |
 | E-39 | ❌ ⚖️ | `skin_tokens.dart:536` E 的 `avatarRadius: 0`（A/H 17）；等 D-05 |
 | E-40 | ❌（低） | `mermaid_block.dart:333` `Color(0x00000000)` |
-| E-41 | ❌ | `pubspec.yaml:6` 仍写"必须与 tag v0.4.14 一致"；`kSelectionBarWidth` 无引用 |
+| E-41 | ✅ 已修（2026-11-24） | `pubspec.yaml` 版本注释改为"tag 必须与本行一致"；`kSelectionBarWidth` 改为**真正被引用**（选中竖条 `width: kSelectionBarWidth`），不再是死常量 |
 | E-42 | ✅ 不复现 | 今天 `flutter analyze`（13 条历史告警）**退出码 0** |
 | E-43 | ❌ | `IMPLEMENTATION-0.4.24.md` 仍是唯一发行说明；README 未覆盖今天的 `docs/*.md` |
 | E-44 | ❌ 无源可接 | 设计仓库没有 `test/` 目录，清单提到的测试文件不存在 |
@@ -180,6 +180,9 @@ E-03（版本/哈希手写）根因没消除：仍是手写文档，没有从构
 ## 五、下一批怎么分（**修正版**：上一版把"需要口径"的混进了"可直接修"）
 
 ### A. 真·不需要裁决（机械修复，改完能自证）
+
+> **2026-11-24 已完成**：A-1…A-8 全部落地（工程 4 条 + 设计 5 条，见下表的"已完成"列）。
+> 设计侧同步在 `keepsake-design` v3.4。
 
 | # | 事项 | 为什么不需要裁决 |
 |---|---|---|

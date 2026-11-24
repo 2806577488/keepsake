@@ -1152,7 +1152,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       // 这里显式写出来，避免以后有人误关）。
       resizeToAvoidBottomInset: true,
       appBar: AppBar(
-        titleSpacing: 8,
+        // SPEC §4.1：水平内边距左右各 4（图标自带 48 触摸区，不再额外加）。
+        titleSpacing: 4,
         title: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
