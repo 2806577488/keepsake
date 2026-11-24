@@ -36,9 +36,6 @@ import '../../core/skin_tokens.dart' show kChipFontSize, kChipIconSize;
 import '../../core/theme.dart'
     show KeepsakeSkinColors, KeepsakeTheme;
 import '../../core/ui/toast.dart' show showTopToast;
-import '../../core/usage/usage.dart' show occupancyPercent;
-import '../../core/usage/usage_store.dart'
-    show SessionUsage, usageStoreProvider;
 import '../../core/voice/voice_error.dart'
     show VoiceError, VoiceText, voiceErrorMessage;
 import '../../core/voice/voice_guards.dart';
@@ -1176,7 +1173,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
             ),
             _ModelPick(
               providerShort: _providerShort(state.providerName),
-              modelLabel: _modelLabel(state.model),
+              // 没有平台时不显示模型名：否则副行会写成「未配置 · deepseek-flash」，
+              // 让用户以为模型已经选好了（模拟器实测发现）。
+              modelLabel: state.providerName.trim().isEmpty
+                  ? ''
+                  : _modelLabel(state.model),
               onTap: () => unawaited(_pickModel()),
             ),
           ],
@@ -1221,10 +1222,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
             children: <Widget>[
               // 用量条在 AppBar 下方、消息区之上、左对齐；设计建议「占用 < 80%
               // 时不出现」，只在接近上下文上限或出错时才占一条位置。
-              _SessionUsageGate(
-                sessionId: state.sessionId,
-                hasError: (state.error ?? '').trim().isNotEmpty,
-              ),
+              _SessionUsageGate(sessionId: state.sessionId),
               _ErrorBanner(
                 message: state.error,
                 onRetry: () => unawaited(_controller.retry()),
@@ -1401,7 +1399,10 @@ class _ModelPick extends StatelessWidget {
           children: <Widget>[
             Flexible(
               child: Text(
-                '$providerShort · $modelLabel',
+                // 没有模型时就只显示平台（未配置），别拼出「未配置 · deepseek-flash」。
+                modelLabel.trim().isEmpty
+                    ? providerShort
+                    : '$providerShort · $modelLabel',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: theme.textTheme.labelSmall?.copyWith(
@@ -3687,48 +3688,23 @@ class _ArrowButton extends StatelessWidget {
   }
 }
 
-/// 用量条闸门（设计稿 B2 / B6）：占用率 < 80% 且没有出错时整条不出现。
+/// 用量条闸门（设计稿 B2 / B6）：只要会话已加载就显示。
 ///
-/// 用量条组件本身在 `session_usage_bar.dart`（不在本批次改动范围），这里只做
-/// 「要不要出现」的判断：读取中 / 无数据都不占位；读取失败或本轮出错要显示。
-class _SessionUsageGate extends ConsumerWidget {
-  const _SessionUsageGate({required this.sessionId, required this.hasError});
+/// 设计稿里聊天页**每个状态**都有顶部用量条（读取中 / 无数据 / 失败都要有位置），
+/// 三种状态由 `SessionUsageBar` 自己表达。
+///
+/// 历史实现卡了「占用 < 80% 就整条不出现」，结果正常使用时永远看不到（E-11 实际未修，
+/// 2026-11-24 模拟器实测确认）。现在只保留「没有会话 id 就不渲染」。
+class _SessionUsageGate extends StatelessWidget {
+  const _SessionUsageGate({required this.sessionId});
 
   /// 当前会话 id；空字符串时整条不渲染。
   final String sessionId;
 
-  /// 本轮是否出错（出错时显示，让用户看到真实占用量）。
-  final bool hasError;
-
-  /// 出现阈值：占用率低于它就不显示（设计建议 80%）。
-  static const double _showThreshold = 80;
-
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     if (sessionId.isEmpty) return const SizedBox.shrink();
-    final contextWindow = ref.watch(settingsProvider).contextWindowTokens;
-    final storeAsync = ref.watch(usageStoreProvider);
-    // 读取失败：交给用量条自己显示失败态（图标转红）。
-    if (storeAsync.hasError) return SessionUsageBar(sessionId: sessionId);
-    final store = storeAsync.value;
-    if (store == null) return const SizedBox.shrink();
-    return StreamBuilder<SessionUsage>(
-      stream: store.sessionChanges(sessionId),
-      initialData: store.sessionUsage(sessionId),
-      builder: (BuildContext context, AsyncSnapshot<SessionUsage> snapshot) {
-        final usage = snapshot.data ?? store.sessionUsage(sessionId);
-        final percent = occupancyPercent(
-          promptTokens: usage.lastPromptTokens,
-          contextWindowTokens: contextWindow,
-        );
-        // 还没请求过（无数据）：不显示，别拿一行「—」占位置。
-        if (percent == null) return const SizedBox.shrink();
-        if (!hasError && percent < _showThreshold) {
-          return const SizedBox.shrink();
-        }
-        return SessionUsageBar(sessionId: sessionId);
-      },
-    );
+    return SessionUsageBar(sessionId: sessionId);
   }
 }
 

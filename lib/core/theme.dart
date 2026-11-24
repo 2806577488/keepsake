@@ -381,13 +381,15 @@ abstract final class KeepsakeTheme {
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: tokens.rField,
-          borderSide: BorderSide.none,
+          // 未聚焦：1px outlineVariant（design-handoff ui-logic §2.8）。
+          borderSide: BorderSide(color: c.ov, width: 1),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: tokens.rField,
-          // 聚焦态：边框 1px → 1.5px、色 outline → onS（v3.2 §2.1）。
-          // 1.5px 而不是 2px：2px 会让输入框视觉宽度变 1px，引发抖动。
-          borderSide: BorderSide(color: c.onS, width: 1.5),
+          // 聚焦：**1.2px 主色**（selBar）。
+          // 原来写的是 1.5px onS（近黑）——模拟器实测发现浅色皮肤上像一圈黑框，
+          // 与设计「聚焦 primary 1.2px」不符，已改为 selBar + 1.2。
+          borderSide: BorderSide(color: c.selBar, width: 1.2),
         ),
       ),
       // 文本选区 / 光标：光标 selBar、宽 2dp（v3.2 §2.1）。
