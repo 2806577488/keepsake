@@ -297,11 +297,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final s = KeepsakeSkinColors.of(context);
     return Row(
       children: [
-        Icon(
-          selected ? Icons.check_circle : Icons.circle_outlined,
-          size: s.iconSize,
-          color: selected ? s.c.selBar : s.c.ov,
-        ),
+        _RadioDot(selected: selected, skin: s),
         const SizedBox(width: 12),
         Expanded(
           child: Column(
@@ -379,11 +375,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       onPressed: () => Navigator.of(context).pop(value),
       child: Row(
         children: [
-          Icon(
-            selected ? Icons.check_circle : Icons.circle_outlined,
-            size: s.iconSize,
-            color: selected ? s.c.selBar : s.c.ov,
-          ),
+          _RadioDot(selected: selected, skin: s),
           const SizedBox(width: 12),
           Text(
             label,
@@ -1465,6 +1457,58 @@ class _SkinRow extends StatelessWidget {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 单选圆点（SPEC §4.7）：固定 20，两种状态都占同一位，行不会因为选中而位移。
+///
+/// 设计明确否掉 Material 的「整块实心 + 白勾」，要的是：
+/// - 未选：2px outline 外环；
+/// - 已选：2px selBar 外环 + 中心 8dp 实心点，中间留白。
+///
+/// 2026-11-24 模拟器实测发现主题/思考强度弹窗还在用 `Icons.check_circle`（实心+勾），
+/// 与设计不符，这里统一成自绘圆点。
+class _RadioDot extends StatelessWidget {
+  const _RadioDot({required this.selected, required this.skin});
+
+  final bool selected;
+  final KeepsakeSkinColors skin;
+
+  /// 外环直径（SPEC §4.7：20）。
+  static const double _size = 20;
+
+  /// 中心实心点直径（SPEC §4.7：8）。
+  static const double _dot = 8;
+
+  @override
+  Widget build(BuildContext context) {
+    // 圆也走 token（rPill = 999），不写 BoxShape.circle。
+    final BorderRadius r = skin.rPill;
+    return SizedBox(
+      width: _size,
+      height: _size,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          borderRadius: r,
+          border: Border.all(
+            color: selected ? skin.c.selBar : skin.c.ov,
+            width: 2,
+          ),
+        ),
+        child: Center(
+          child: selected
+              ? Container(
+                  width: _dot,
+                  height: _dot,
+                  decoration: BoxDecoration(
+                    color: skin.c.selBar,
+                    borderRadius: r,
+                  ),
+                )
+              : null,
         ),
       ),
     );

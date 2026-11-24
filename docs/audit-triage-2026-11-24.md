@@ -110,7 +110,7 @@ E-03（版本/哈希手写）根因没消除：仍是手写文档，没有从构
 | E-14 | ❌ ⚖️ | `chat_screen.dart:1794` `width * 0.76`（规范：用户屏宽−88 / AI 屏宽−56） |
 | E-15 | ❌ | `sessions_screen.dart:849` `Divider(height: 1)` 通栏（规范左缩进 62） |
 | E-16 | ❌ ⚖️ | `sessions_screen.dart:967-976` 竖条 2px；`kSelectionBarWidth = 2` 且**没有任何引用**（`skin_tokens.dart:41`） |
-| E-17 | ⏳ 未复核 | settings 里没搜到 `RadioListTile`（只有 `import_tile.dart:394+`），需逐屏看是否自绘 |
+| E-17 | 部分修（2026-11-24 模拟器实测） | 主题/配色方案/思考强度三处弹窗原来用 `Icons.check_circle`（实心+白勾），不符合「20 外环 + 中心 8dp 点」。已换自绘 `_RadioDot`（`settings_screen.dart` 末）。**导入确认弹窗仍是 Material `RadioListTile`**（import_tile.dart），留作后续 |
 | E-18 | 部分 | 按压态按 v3.1 新规则复用 `high`（不需要新 token）；`fabLine` 仍缺（与 E-12 同源） |
 | E-19 | ⏳ 未复核 | E 字体预加载路径未逐行看 |
 | E-20 | ⏳ 未复核 | 左滑背景已是 `errorContainer`（`sessions_screen.dart:868`）；确认弹窗按钮配色未核 |
