@@ -22,8 +22,13 @@
 flutter pub get
 flutter analyze
 flutter build apk --release --target-platform android-arm64
+# 出包后自检：每个被声明的 ABI 都必须带 libflutter.so（否则装到对应设备上启动即崩）
+python tool/check_apk_abi.py build/app/outputs/flutter-apk/app-release.apk
 ```
 
+- `--target-platform` 现在会**自动收紧 abiFilters**（`android/app/build.gradle.kts`）：
+  以前只有 `build-abis.cmd` 设 `keepsakeAbi` 才过滤，按上面这条命令出包会得到
+  「声明 3 个 ABI、只带 arm64 引擎库」的必崩包。
 - 应用只面向 Android（Windows / iOS 未验证）。
 - 发布包目前使用 debug 签名，覆盖安装前请先备份并卸载旧版。
 

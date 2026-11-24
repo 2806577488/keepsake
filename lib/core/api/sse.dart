@@ -40,6 +40,19 @@ const String sseInterruptedEventMessage = '连接中断，没有收到结束事�
 /// Anthropic 结束事件名。
 const String sseEventMessageStop = 'message_stop';
 
+/// 单行长度上限（字符）：256KB。
+///
+/// 为什么要上限：SSE 是"服务端想发多长就多长"的协议，解析器按行缓冲、
+/// 按事件累积。一个只会发超长行/超大事件的坏服务端（或被劫持的中间层）
+/// 可以把内存吃满直到进程被杀。正常模型的增量 JSON 每行只有几百字节到几 KB。
+const int sseMaxLineChars = 256 * 1024;
+
+/// 单事件长度上限（字符）：4MB。
+///
+/// 一个事件 = 若干 `data:` 行拼起来；4MB 已经远大于任何正常增量片段
+/// （连整段代码块一次性下发也就几十 KB）。
+const int sseMaxEventChars = 4 * 1024 * 1024;
+
 /// SSE 事件。
 class SseEvent {
   const SseEvent({this.event, this.data = '', this.id, this.retry});
@@ -120,6 +133,9 @@ class SseParser {
   bool _lastWasCr = false;
   int _eventCount = 0;
 
+  /// 当前事件已累积的 `data:` 字符数（用于单事件上限）。
+  int _dataChars = 0;
+
   /// 是否已收到结束标记。
   bool get isTerminated => _terminated;
 
@@ -155,6 +171,13 @@ class SseParser {
       }
       _lastWasCr = false;
       _line.write(char);
+      // 单行上限：坏服务端发一行超长数据时不把内存吃满（E-26）。
+      if (_line.length > sseMaxLineChars) {
+        _line.clear();
+        throw const SseLimitExceededException(
+          '流式数据异常：单行超过 256KB，已中断',
+        );
+      }
     }
   }
 
@@ -185,6 +208,15 @@ class SseParser {
 
     switch (field) {
       case 'data':
+        // 单事件上限：多行 data 累加，超过 4MB 直接中断（E-26）。
+        _dataChars += value.length;
+        if (_dataChars > sseMaxEventChars) {
+          _dataLines.clear();
+          _dataChars = 0;
+          throw const SseLimitExceededException(
+            '流式数据异常：单事件超过 4MB，已中断',
+          );
+        }
         _dataLines.add(value);
       case 'event':
         _eventName = value.isEmpty ? null : value;
@@ -208,6 +240,7 @@ class SseParser {
       retry: _retry,
     );
     _dataLines.clear();
+    _dataChars = 0;
     _eventName = null;
     _id = null;
     _retry = null;
@@ -227,6 +260,19 @@ class SseInterruptedException implements Exception {
   const SseInterruptedException(this.message);
 
   /// 「连接中断，没有收到结束标记」/「连接中断，没有收到结束事件」。
+  final String message;
+
+  @override
+  String toString() => message;
+}
+
+/// 流式数据超过长度上限（单行 256KB / 单事件 4MB）。
+///
+/// 与断流异常分开：这是"服务端/中间层在发畸形数据"，不是网络断流；
+/// client 层统一按普通错误展示，文案里已写明原因与上限（E-26）。
+class SseLimitExceededException implements Exception {
+  const SseLimitExceededException(this.message);
+
   final String message;
 
   @override

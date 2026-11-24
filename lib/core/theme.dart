@@ -609,12 +609,12 @@ MarkdownStyleSheet keepsakeMarkdownStyleSheet(ThemeData theme) {
       fontSize: m.fsBody,
       height: m.lineHeight,
     ),
-    blockquotePadding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+    blockquotePadding: const EdgeInsets.fromLTRB(12, 4, 10, 4),
     blockquoteDecoration: BoxDecoration(
-      color: s.codeHeader,
-      borderRadius: s.rCard,
+      // 引用块：左侧 2px `selectionBar` 竖线、不铺底色（v3.3 §1.2）。
+      // 运行时本来由 markdown_view 覆盖，这里也同步，避免两处样式漂移（E-37）。
       border: Border(
-        left: BorderSide(color: scheme.primary.withValues(alpha: 0.6), width: 3),
+        left: BorderSide(color: s.selectionBar, width: 2),
       ),
     ),
     tableBorder: TableBorder.all(color: s.codeDivider),

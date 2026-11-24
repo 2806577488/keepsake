@@ -91,6 +91,7 @@ class ApkAsset {
     required this.name,
     required this.url,
     required this.size,
+    this.checksumUrl,
   });
 
   /// 附件名（`assets[].name`），用作本地文件名。
@@ -101,6 +102,13 @@ class ApkAsset {
 
   /// 字节数；GitHub 未给出时为 0。
   final int size;
+
+  /// 同名 `.sha256` 附件的下载地址（构建库发布时会带）；没有时为 null。
+  /// 有它就下载后强制校验，没有就跳过（兼容老版本 Release）。
+  final String? checksumUrl;
+
+  /// 是否有可用的校验文件。
+  bool get hasChecksum => (checksumUrl ?? '').trim().isNotEmpty;
 }
 
 /// 一次更新检查的结果。
@@ -559,7 +567,7 @@ abstract final class UpdateService {
     if (asset == null) {
       throw const UpdateException('下载失败：这个版本没有提供 APK 安装包');
     }
-    return _streamToFile(
+    final file = await _streamToFile(
       url: asset.url,
       fileName: _safeFileName(asset.name, fallbackVersion: info.latest),
       label: '安装包',
@@ -567,6 +575,83 @@ abstract final class UpdateService {
       timeout: timeout,
       httpClient: httpClient,
     );
+    // 构建库会给每个 APK 发一个 `.sha256` 附件：有就强制校验，不匹配直接删文件并报错，
+    // 绝不把半截/被篡改的包交给安装器（E-24）。老版本 Release 没有该附件时跳过。
+    await _verifyDownloadChecksum(info, file, httpClient: httpClient, timeout: timeout);
+    return file;
+  }
+
+  /// 下载完整包后按 `<apk>.sha256` 校验；没有校验附件时静默跳过。
+  static Future<void> _verifyDownloadChecksum(
+    UpdateInfo info,
+    File file, {
+    http.Client? httpClient,
+    Duration timeout = defaultTimeout,
+  }) async {
+    final String url = info.apk?.checksumUrl ?? '';
+    if (url.isEmpty) return;
+    final String expected = await _fetchChecksum(url, httpClient: httpClient, timeout: timeout);
+    if (expected.isEmpty) {
+      debugPrint('校验附件里没有解析出 sha256，跳过校验');
+      return;
+    }
+    final String? actual = await _fileSha256(file.path);
+    if (actual == null || actual.length != 64) {
+      // 原生算不出来（通道不可用/权限异常）时不阻塞更新，但留日志便于排查。
+      debugPrint('算不出本地安装包的 sha256，跳过校验');
+      return;
+    }
+    if (actual.toLowerCase() != expected) {
+      try {
+        if (await file.exists()) await file.delete();
+      } catch (error) {
+        debugPrint('删除校验失败的安装包失败：$error');
+      }
+      throw const UpdateException('安装包校验失败（sha256 不匹配），文件已删除，请重试');
+    }
+  }
+
+  /// 读取 `.sha256` 附件，返回 64 位小写十六进制；解析失败返回空串。
+  static Future<String> _fetchChecksum(
+    String url, {
+    http.Client? httpClient,
+    Duration timeout = defaultTimeout,
+  }) async {
+    final client = httpClient ?? http.Client();
+    final owned = httpClient == null;
+    try {
+      final response = await client
+          .get(Uri.parse(url), headers: <String, String>{'User-Agent': userAgent})
+          .timeout(timeout);
+      if (response.statusCode != 200) {
+        debugPrint('读取 sha256 附件失败：HTTP ${response.statusCode}');
+        return '';
+      }
+      final match = RegExp(r'[0-9a-fA-F]{64}').firstMatch(utf8.decode(response.bodyBytes));
+      return match?.group(0)?.toLowerCase() ?? '';
+    } catch (error) {
+      debugPrint('读取 sha256 附件异常：$error');
+      return '';
+    } finally {
+      if (owned) client.close();
+    }
+  }
+
+  /// 原生算任意文件的 sha256（Dart 侧没有加密库）。
+  static Future<String?> _fileSha256(String path) async {
+    try {
+      final String? hash = await _channel.invokeMethod<String>(
+        'fileSha256',
+        <String, Object?>{'path': path},
+      );
+      final String value = (hash ?? '').trim();
+      return value.length == 64 ? value : null;
+    } on MissingPluginException {
+      return null;
+    } on PlatformException catch (error) {
+      debugPrint('原生计算 sha256 失败：${error.message ?? error.code}');
+      return null;
+    }
   }
 
   /// 把一个远程文件流式写到 `updates/` 下（完整 APK 与差分补丁共用）。
@@ -871,11 +956,27 @@ abstract final class UpdateService {
 
     final sizeRaw = chosen['size'];
     final size = sizeRaw is num ? sizeRaw.toInt() : int.tryParse('$sizeRaw') ?? 0;
+    final name = (chosen['name'] ?? 'keepsake.apk').toString();
     return ApkAsset(
-      name: (chosen['name'] ?? 'keepsake.apk').toString(),
+      name: name,
       url: (chosen['browser_download_url'] ?? '').toString(),
       size: size < 0 ? 0 : size,
+      // 构建库（keepsake-build）对每个 APK 都会发一个 `<apk>.sha256` 附件（E-24）。
+      checksumUrl: _checksumUrlFor(rawAssets, name),
     );
+  }
+
+  /// 找 `<apk 名>.sha256` 附件的下载地址；没有返回 null。
+  static String? _checksumUrlFor(Object? rawAssets, String apkName) {
+    if (rawAssets is! List) return null;
+    final String target = '${apkName.toLowerCase()}.sha256';
+    for (final item in rawAssets) {
+      if (item is! Map) continue;
+      final String name = (item['name'] ?? '').toString().toLowerCase();
+      final String url = (item['browser_download_url'] ?? '').toString();
+      if (name == target && url.isNotEmpty) return url;
+    }
+    return null;
   }
 
   /// 所有 APK 附件（名字统一转小写，便于按 ABI 匹配）。

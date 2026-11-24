@@ -54,7 +54,7 @@
 | `outlineVariant` @60% | 代码块边框、输入栏顶边 | 混入 `surface` |
 | `error` @60% | 出错气泡描边 | 混入气泡底 |
 | `primary` @40% | 选中芯片描边 | 混入芯片底 |
-| `primary` @60% | Markdown 引用块左侧 3px 竖线、链接下划线 | — |
+| `primary` @60% | 链接下划线（引用块竖线已改为 `selectionBar` 2px，不再用 primary） | — |
 | 深色代码块底 | `surfaceContainerHighest` 压 `black` 18% | — |
 
 ### 1.3 语义映射规则（**不要改**）

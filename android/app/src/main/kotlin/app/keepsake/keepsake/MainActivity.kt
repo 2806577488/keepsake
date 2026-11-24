@@ -153,6 +153,8 @@ class MainActivity : FlutterActivity() {
                     "installedApkSha256" -> installedApkSha256(result)
                     // 差分更新：把补丁套到已安装 APK 上，校验通过后返回新 APK 路径。
                     "applyPatch" -> applyPatch(call, result)
+                    // 完整包下载后的 sha256 校验（E-24）：Dart 侧没有加密库。
+                    "fileSha256" -> fileSha256(call.argument<String>("path"), result)
                     else -> result.notImplemented()
                 }
             }
@@ -466,6 +468,25 @@ class MainActivity : FlutterActivity() {
             return
         }
         runOnBackground(result) { BsPatch.sha256(File(path)) }
+    }
+
+    /**
+     * 任意文件的 sha256（完整包下载后的校验用，E-24）。
+     *
+     * 为什么放原生：Dart 侧没有加密库，且 40MB 级 APK 用纯 Dart 算会很慢；
+     * [BsPatch.sha256] 是现成的流式实现，走后台线程。
+     */
+    private fun fileSha256(rawPath: String?, result: MethodChannel.Result) {
+        if (rawPath.isNullOrBlank()) {
+            result.error("BAD_ARGS", "文件路径为空", null)
+            return
+        }
+        val file = File(rawPath)
+        if (!file.exists() || !file.isFile) {
+            result.error("FILE_MISSING", "文件不存在：$rawPath", null)
+            return
+        }
+        runOnBackground(result) { BsPatch.sha256(file) }
     }
 
     /**

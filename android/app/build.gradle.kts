@@ -53,15 +53,33 @@ android {
         versionCode = flutter.versionCode
         versionName = flutter.versionName
 
-        // 单 ABI 打包。build-abis.cmd 在每次 flutter build 前设置
-        // ORG_GRADLE_PROJECT_keepsakeAbi=arm64|arm，Gradle 以项目属性读到它。
+        // 单 ABI 打包（E-01 / N-1）。
         //
         // 为什么必须过滤：Flutter 只把引擎（libflutter/libapp/libsqlite3）放进
         // 目标 ABI 目录，但插件的 .so（libdartjni、libdatastore_shared_counter）
         // 会被 AGP 打进所有 ABI 目录。结果 APK 的 aapt 声明了三个 ABI，
         // x86_64 设备看到 lib/x86_64/ 就选它，启动时缺 libflutter.so →
         // UnsatisfiedLinkError（真机实测报告 E-01）。
+        //
+        // 过滤来源（按优先级）：
+        // 1) `-PkeepsakeAbi=arm64|arm`（build-abis.cmd / CI 显式指定，最高优先）；
+        // 2) Flutter 的 `-Ptarget-platform=android-arm64` 等——**这条以前缺了**，
+        //    所以 README 里 `flutter build apk --release --target-platform android-arm64`
+        //    会重新产出「声明 3 个 ABI、只带 arm64 引擎库」的必崩包（N-1）；
+        // 3) 都没传（普通 `flutter build apk`）→ 交给 Flutter 的多 ABI 打包（此时
+        //    三个 ABI 都有引擎库，是合法的）。
+        val abiByTargetPlatform = mapOf(
+            "android-arm64" to "arm64-v8a",
+            "android-arm" to "armeabi-v7a",
+            "android-x64" to "x86_64",
+            "android-x86" to "x86",
+        )
         val keepsakeAbi = (project.findProperty("keepsakeAbi") as String?)?.lowercase()
+        val targetAbis = (project.findProperty("target-platform") as String?)
+            ?.split(',')
+            ?.mapNotNull { abiByTargetPlatform[it.trim()] }
+            ?.distinct()
+            ?.takeIf { it.isNotEmpty() }
         if (keepsakeAbi != null) {
             ndk {
                 abiFilters.clear()
@@ -72,6 +90,11 @@ android {
                         else -> throw GradleException("未知识别 abi：$keepsakeAbi")
                     }
                 )
+            }
+        } else if (targetAbis != null) {
+            ndk {
+                abiFilters.clear()
+                abiFilters.addAll(targetAbis)
             }
         }
     }

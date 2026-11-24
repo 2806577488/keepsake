@@ -86,7 +86,7 @@ E-03（版本/哈希手写）根因没消除：仍是手写文档，没有从构
 |---|---|---|
 | E-01 | ❌ 本次实测仍可复现 | 见 N-1：默认构建产出 3-ABI 声明 + 只有 arm64 引擎库 |
 | E-02 | ⏳ 需真机 | 导入收尾仍在主 isolate；未新增分帧/`PostFrameCallback` 证据 |
-| E-03 | ❌ | `docs/IMPLEMENTATION-0.4.24.md` 仍是最新发行说明；无 0.4.25/0.4.26 |
+| E-03 | ✅ 机制已修（2026-11-24） | keepsake-build CI 现在把发行说明作为资产发布（`IMPLEMENTATION-<ver>.md`，版本/哈希/签名指纹都取自构建产物）；仓库里的 `IMPLEMENTATION-0.4.24.md` 降级为历史文档 |
 
 ### B. 高
 
@@ -117,9 +117,9 @@ E-03（版本/哈希手写）根因没消除：仍是手写文档，没有从构
 | E-21 | ⏳ 未复核 | 自动滚动阈值 / 节流 / 新内容浮标未逐行核 |
 | E-22 | 同 E-04 | — |
 | E-23 | ⏳ 未复核 | 输入框常态边框未核 |
-| E-24 | ❌ 疑似 | `update_service.dart` 只见补丁 sha256 校验；完整包下载未见目标 sha256 校验 |
+| E-24 | ✅ 已修（2026-11-24） | 构建库本来就发 `<apk>.sha256` 附件；App 侧 `update_service` 下载后按附件校验（不匹配删文件+报错），原生加 `fileSha256` 方法 |
 | E-25 | ⏳ 未复核 | `database.dart` onUpgrade 的 catch 未逐行看 |
-| E-26 | ❌ | `core/api/sse.dart` 无行/事件长度上限 |
+| E-26 | ✅ 已修（2026-11-24） | `sse.dart` 加单行 256KB / 单事件 4MB 上限，超限抛 `SseLimitExceededException`；新增 `test/sse_limits_test.dart` 3 条回归 |
 | E-27 | 部分 | CRC 已校验（`zip_reader.dart:307`）、非 UTF-8 已回退（`:363`、`:549-554`）；背压/半截文件未核 |
 | E-28 | ✅ 已修（2026-11-24） | 后台已在删时先 `return` 并提示「正在删除会话，请稍候再试」；事务回滚时提示「删除失败…已整体回滚」（`sessions_screen.dart` `_deleteSelected`） |
 | E-29 | ✅ | `import_task.dart:143`「正在导入 x / y」 |
@@ -130,7 +130,7 @@ E-03（版本/哈希手写）根因没消除：仍是手写文档，没有从构
 | E-34 | ✅ | `import_tile.dart:381`「确认导入历史对话？」 |
 | E-35 | ✅ | `chat_screen.dart:982/3204`「发消息…」 |
 | E-36 | ✅ 已修（2026-11-24） | `chat_screen.dart` AppBar `titleSpacing: 8 → 4`（SPEC §4.1） |
-| E-37 | ❌ | `theme.dart:607-613` 引用块 decoration；`markdown_view.dart:717-719` |
+| E-37 | ✅ 已修（2026-11-24） | `theme.dart` 引用块改 2px `selectionBar`、不铺底（与 `markdown_view` 一致）；`tokens.md` 同步 |
 | E-38 | ⏳ 未复核 | 朗读项图标↔文字间距未核 |
 | E-39 | ✅ 已修（v3.5） | `skin_tokens.dart` E 的 `avatarRadius: 0 → 17`（圆形，与 A/H 一致） |
 | E-40 | ❌（低） | `mermaid_block.dart:333` `Color(0x00000000)` |
