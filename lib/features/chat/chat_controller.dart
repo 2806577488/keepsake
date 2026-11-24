@@ -717,6 +717,44 @@ class ChatController extends Notifier<ChatUiState> {
     if (sub != null) unawaited(sub.cancel());
     _backend?.dispose();
     _backend = null;
+    // E-08 / WB-03：流式中途离开（返回、切会话、App 被回收）时把已流出的内容落库。
+    // 原来只 cancel，占位行留在库里是空的、已流出的文本全丢。
+    _persistAbandonedStream();
+  }
+
+  /// 把「流式途中被销毁」的现场保存下来（E-08）。
+  ///
+  /// - 已经流出正文/思考：写回那条 ASSISTANT 行，并标 `error` 旗标，
+  ///   用户回来能看到「这条回答中断了」+ 已生成的部分；
+  /// - 一个字都没收到：删掉占位行，不留空回答。
+  ///
+  /// 只有在 provider 还存在时才需要保存（正常结束由 [_persistFinal] 负责）。
+  void _persistAbandonedStream() {
+    final String? assistantId = _streamingId;
+    if (assistantId == null) return;
+    final String text = _applyCitationMarkers(_streamText.toString().trim());
+    final String thinking = _streamThinking.toString().trim();
+    final double? elapsed = _thinkingStartedAt == null
+        ? null
+        : DateTime.now().difference(_thinkingStartedAt!).inMilliseconds / 1000.0;
+    final List<blk.ContentBlock> blocks = <blk.ContentBlock>[
+      if (thinking.isNotEmpty)
+        blk.ContentBlock.thinking(thinking, elapsedSeconds: elapsed),
+      if (text.isNotEmpty) blk.ContentBlock.text(text),
+      ..._streamBlocks,
+    ];
+    final db = _db;
+    unawaited(() async {
+      try {
+        if (blocks.isEmpty) {
+          await db.deleteMessage(assistantId);
+        } else {
+          await _replaceAssistant(assistantId, blocks, flags: MessageFlag.error);
+        }
+      } catch (error) {
+        debugPrint('保存被中断的流式内容失败：$error');
+      }
+    }());
   }
 
   /// 绑定会话（非 family 接线的兜底入口）。
@@ -1828,10 +1866,13 @@ class ChatController extends Notifier<ChatUiState> {
     );
   }
 
-  /// 流式高频回调的合并通知（60ms 一次，避免每 token 重建整页）。
+  /// 流式高频回调的合并通知（100ms 一次，避免每 token 重建整页）。
+  ///
+  /// E-07：原来 60ms；配合"流式中用纯文本渲染"（chat_screen `_AssistantBody`），
+  /// 一帧里的 Markdown 解析/语法高亮已经省掉，这里再把频率降一档，进一步减少重建。
   void _scheduleNotify() {
     if (_disposed || _notifyTimer != null) return;
-    _notifyTimer = Timer(const Duration(milliseconds: 60), () {
+    _notifyTimer = Timer(const Duration(milliseconds: 100), () {
       _notifyTimer = null;
       if (!_disposed) _notify();
     });

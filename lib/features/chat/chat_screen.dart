@@ -1101,23 +1101,27 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     int index,
   ) {
     final isLast = index == state.messages.length - 1;
-    return _MessageBubble(
-      message: message,
-      onLongPress: () => unawaited(_showMessageMenu(message)),
-      onCopy: () => unawaited(_copyMessage(message)),
-      onOpenLink: (String text, String? href, String title) =>
-          unawaited(_openLink(href)),
-      onPrevBranch: message.canPrevBranch
-          ? () => unawaited(_controller.switchBranch(message.id, -1))
-          : null,
-      onNextBranch: message.canNextBranch
-          ? () => unawaited(_controller.switchBranch(message.id, 1))
-          : null,
-      onRegenerate: message.isAssistant
-          ? () => unawaited(_controller.regenerate(message.id))
-          : null,
-      onToast: _toast,
-      showTail: isLast,
+    // E-07：每条气泡独立重绘边界——流式时只有正在生成的那条会重绘，
+    // 已完成的消息不跟着一起重排版。
+    return RepaintBoundary(
+      child: _MessageBubble(
+        message: message,
+        onLongPress: () => unawaited(_showMessageMenu(message)),
+        onCopy: () => unawaited(_copyMessage(message)),
+        onOpenLink: (String text, String? href, String title) =>
+            unawaited(_openLink(href)),
+        onPrevBranch: message.canPrevBranch
+            ? () => unawaited(_controller.switchBranch(message.id, -1))
+            : null,
+        onNextBranch: message.canNextBranch
+            ? () => unawaited(_controller.switchBranch(message.id, 1))
+            : null,
+        onRegenerate: message.isAssistant
+            ? () => unawaited(_controller.regenerate(message.id))
+            : null,
+        onToast: _toast,
+        showTail: isLast,
+      ),
     );
   }
 
@@ -1936,6 +1940,21 @@ class _AssistantBodyState extends State<_AssistantBody> {
     final theme = Theme.of(context);
     // 为什么：字号 / 行高 / 圆角只能来自皮肤 token（H 正文 16，A 15）。
     final skin = KeepsakeSkinColors.of(context);
+    // E-07：流式期间只渲染**纯文本**，不做 Markdown 解析、不做代码高亮。
+    // 这一段是 v3.2 §3 卡顿的根因之一（每个 tick 都重新解析整段并逐帧高亮代码块）；
+    // 流结束后 streaming 变 false，会自动换成下面的完整 KeepsakeMarkdown（一次性解析）。
+    if (widget.message.streaming) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+        child: SelectableText(
+          text,
+          style: theme.textTheme.bodyLarge?.copyWith(
+            fontSize: skin.fsBody,
+            height: skin.lineHeight,
+          ),
+        ),
+      );
+    }
     if (!_expanded && text.length > _AssistantBody.plainTextThreshold) {
       // 气泡内 padding 归零后，这里自己补回助手正文内距 16/14（SPEC §4.3）。
       return Padding(
@@ -2152,22 +2171,29 @@ class _StreamStatus extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: <Widget>[
-        const SizedBox(
-          width: 12,
-          height: 12,
-          child: CircularProgressIndicator(strokeWidth: 1.6),
+    // E-22：固定 24dp 高的占位行——无论文案长短都不让气泡高度抖一下。
+    return SizedBox(
+      height: 24,
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            const SizedBox(
+              width: 12,
+              height: 12,
+              child: CircularProgressIndicator(strokeWidth: 1.6),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              searching ? '正在联网搜索' : '正在思考…',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
         ),
-        const SizedBox(width: 8),
-        Text(
-          searching ? '正在联网搜索' : '正在思考…',
-          style: theme.textTheme.bodySmall?.copyWith(
-            color: theme.colorScheme.onSurfaceVariant,
-          ),
-        ),
-      ],
+      ),
     );
   }
 }

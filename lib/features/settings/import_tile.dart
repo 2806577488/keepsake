@@ -450,10 +450,14 @@ class _ImportHistoryTileState extends ConsumerState<ImportHistoryTile> {
     return result;
   }
 
-  /// 导入完成后按模式建卡/绑卡（失败静默，不影响已导入的对话）。
+  /// 导入完成后按模式建卡/绑卡。
+  ///
+  /// E-05：这里以前整段 `catch (_)` 静默——任何一步失败（聚类慢/模型不可用/写库异常）
+  /// 用户都只会看到「N 个会话缺少角色卡」，却不知道发生了什么、该去哪补。
+  /// 现在：失败会明确提示，收尾也会再查一次缺卡数并给出「设置 › 数据维护 › 修复会话数据」的入口。
   Future<void> _applyCharacterMode(AppDatabase db, _ImportChoice choice) async {
+    final service = CharacterService(db);
     try {
-      final service = CharacterService(db);
       final ids = await service.unboundSessionIds();
       if (ids.isEmpty) return;
       switch (choice.mode) {
@@ -479,8 +483,23 @@ class _ImportHistoryTileState extends ConsumerState<ImportHistoryTile> {
       // （事实 / 情节 / 人格 / 情绪）；后台跑，失败静默。
       await service.renameGenericCards();
       await BrainService(db).consolidateImportedSessions();
+    } catch (error) {
+      if (mounted) {
+        _toast('导入完成，但建角色卡中断了：$error（可去 设置 › 数据维护 补建）');
+      }
+      return;
+    }
+    // 收尾校验：确实还有缺卡就明说，别让用户在数据维护页自己发现（E-05）。
+    try {
+      final remaining = await service.unboundSessionIds();
+      if (remaining.isNotEmpty && mounted) {
+        _toast(
+          '导入完成；还有 ${remaining.length} 个会话没有角色卡，'
+          '可在 设置 › 数据维护 › 修复会话数据 一键补建',
+        );
+      }
     } catch (_) {
-      // 建卡失败不影响已导入的对话。
+      // 校验失败不影响导入结果。
     }
   }
 
