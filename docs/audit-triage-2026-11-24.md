@@ -151,10 +151,10 @@ E-03（版本/哈希手写）根因没消除：仍是手写文档，没有从构
 | D-02 `--meta-font` | ❌ | `SPEC.md:87` 三套无衬线 ↔ 硬性约束 5 与 §0 说 E 衬线/等宽 |
 | D-03 `--row-h` H 68 vs 78 | ❌ | `SPEC.md:83` 68 ↔ `:96` 78 |
 | D-04 A `--title-w` | ❌ | `SPEC.md:86` 600；token 表该格空；`skin_tokens.dart` A 段无 titleWeight=600 |
-| D-05 `--av-r` 未定义 | ❌ | SPEC §4.2 引用 `--av-r`，token 表无此行；`skin_tokens.dart:223` E `avatarSize: 6, avatarRadius: 6`（6dp 头像不可能） |
+| D-05 `--av-r` 未定义 | ✅ 已修（v3.5） | HTML 有 `--av-r`（A=17、E=6）；按裁决统一 17 圆形，E 已改；token 表补 `--av-r` 行 |
 | D-06 `r-send/r-fab/r-sheet` 三套缺值 | ❌ | SPEC §4.5/4.6 引用，token 表无；只有 dart 里有 |
 | D-07 `[N]` 引用样式缺 | ❌ | `full.css` 无 `.cite` |
-| D-08 19 个变量跨来源不一致（E 圆角=H） | ❌ | `skin_tokens.dart` E 小圆角 ↔ `full-*.html` E 全取 H 值 |
+| D-08 19 个变量跨来源不一致（尤其 E 圆角=H） | **审计结论有误**（2026-11-24 复核） | 逐个文件核对：三份 HTML 的 E 块写的是 `r-bubble 8 / r-card 6 / r-chip 3 / r-field 6 / r-send 6 / r-fab 6 / r-sheet 14 / r-cb 3`，与 `skin_tokens.dart` 的 E **一致**；旧审计报的「E = H 的 14/12/8…」是把 H 块当成 E 解析了（`check_consistency.py` 的 `extract_html` 用正则抓块，容易抓错）。真正仍不一致的是 `fs-title`（见下表 E/H 行） |
 | D-09 屏数多种说法 | ❌ | `reference/index.html:27`「30 个屏」、`:53`「9 张 1360 宽」；SPEC 411×892 |
 | D-10 chip 32 vs 36 | ❌ | SPEC §4.8 32 ↔ `full.css:172` 36 |
 | D-11 chip 图标 15 vs 13–14 | ❌ | SPEC 15 ↔ `docs/icons.md:75`「13–14」 |
