@@ -6,7 +6,7 @@
 /// 结构（自上而下）：
 /// - `AppBar`：会话标题 + [_ModelPick]（平台与模型，当前会话）+ 分支导航 + 更多菜单
 /// - [_ErrorBanner]：错误条（重试 / 关闭）
-/// - 消息列表：`ScrollablePositionedList`（[_scrollToIndex] / [_jumpToBottom]），
+/// - 消息列表：普通 `ListView` + [ScrollController]（[_jumpToBottom] / [_pinToBottom]），
 ///   每条消息 = [_MessageBubble]，最后一条 assistant 带 [_BranchSwitcher] + [_RegenerateButton]
 /// - 空态：[_EmptyChat]（「问点什么」）
 /// - 附件草稿：[_PendingChips]（[_AttachmentView]）
@@ -25,7 +25,6 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/chat/attachments.dart' show AttachmentRules;
@@ -71,8 +70,13 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   final TextEditingController _input = TextEditingController();
   final FocusNode _inputFocus = FocusNode();
 
-  final ItemScrollController _itemScrollController = ItemScrollController();
-  final ItemPositionsListener _itemPositions = ItemPositionsListener.create();
+  /// 消息列表的滚动控制器（普通 `ListView`）。
+  ///
+  /// 2026-11-24：从 `ScrollablePositionedList` 换成普通 `ListView`。
+  /// SPL 的 `maxScrollExtent` 是懒加载估值，`jumpTo(index, alignment: 1)` 在气泡
+  /// 比视口高时贴不住底 → 流式时列表反复回到「输入框下方」（也就是气泡顶部），
+  /// 用户既滑不动、也看不到后面生成的内容。普通 ListView 的 max 是真实值。
+  final ScrollController _scroll = ScrollController();
 
   /// 是否已经做过"进会话先贴底"的初始定位。
   bool _didInitialPin = false;
@@ -111,12 +115,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     return from.clamp(0, count);
   }
 
-  /// 消息下标 → 列表下标（窗口前移后列表第 0 项是「加载更早」）。
-  int _listIndex(int from, int messageIndex) {
-    final hasEarlier = from > 0;
-    return messageIndex - from + (hasEarlier ? 1 : 0);
-  }
-
   ChatController get _controller =>
       ref.read(chatControllerProvider(widget.sessionId).notifier);
 
@@ -126,11 +124,14 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   void initState() {
     super.initState();
     _input.addListener(_onInputChanged);
+    _scroll.addListener(_onScrollMetricsFromController);
   }
 
   @override
   void dispose() {
     _input.removeListener(_onInputChanged);
+    _scroll.removeListener(_onScrollMetricsFromController);
+    _scroll.dispose();
     _autoFollow.dispose();
     final hold = _hold;
     _hold = null;
@@ -195,9 +196,17 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       if (!_autoFollow.value) _autoFollow.value = true;
       return;
     }
-    // 只有**用户自己拖动**才停止跟随：SPL 的懒加载会让程序贴底后
-    // extentAfter 仍报一个估值，若按它判断，按钮会一直挂着（实测）。
+    // 只有**用户自己拖动**才停止跟随。
     if (userDrag && _autoFollow.value) _autoFollow.value = false;
+  }
+
+  /// ScrollController 自己的监听：程序贴底时不一定发滚动通知，这里兜一层。
+  void _onScrollMetricsFromController() {
+    if (!_scroll.hasClients) return;
+    final ScrollPosition p = _scroll.position;
+    if (!p.hasContentDimensions) return;
+    final bool atBottom = (p.maxScrollExtent - p.pixels) <= _followThreshold;
+    if (atBottom && !_autoFollow.value) _autoFollow.value = true;
   }
 
   void _onInputChanged() {
@@ -207,36 +216,40 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   /// 滚到底（[_jumpToBottom]）。
   void _jumpToBottom({bool animate = true}) {
     _autoFollow.value = true;
-    if (!mounted || !_itemScrollController.isAttached) return;
-    final count = _state.messages.length;
-    if (count <= 0) return;
-    final from = _windowFrom(count);
-    final lastIndex = _listIndex(from, count - 1);
+    if (!mounted || !_scroll.hasClients) return;
+    final ScrollPosition p = _scroll.position;
+    if (!p.hasContentDimensions) return;
+    final double target = p.maxScrollExtent;
     if (animate) {
-      _itemScrollController.scrollTo(
-        index: lastIndex,
-        duration: const Duration(milliseconds: 220),
-        curve: Curves.easeOutCubic,
-        alignment: 1,
+      unawaited(
+        p.animateTo(
+          target,
+          duration: const Duration(milliseconds: 220),
+          curve: Curves.easeOutCubic,
+        ),
       );
     } else {
-      _itemScrollController.jumpTo(index: lastIndex, alignment: 1);
+      p.jumpTo(target);
     }
   }
 
-  /// 「加载更早」：窗口前移一段，并保持当前首条消息在屏幕顶部的视觉位置。
+  /// 「加载更早」：窗口前移一段，并保持当前看得见的那条不动。
   void _loadEarlier(int from) {
     final count = _state.messages.length;
     if (from <= 0) return;
     final next = (from - _windowStep).clamp(0, count);
-    final anchor = from;
+    // 前面插入 N 条后 maxScrollExtent 会变大；把 pixels 同步加同样的增量，
+    // 屏幕上的内容就不会跳（普通 ListView 没有"按条目对齐"的 API）。
+    final double? oldMax = _scroll.hasClients
+        ? _scroll.position.maxScrollExtent
+        : null;
+    final double? oldPixels = _scroll.hasClients ? _scroll.position.pixels : null;
     setState(() => _windowStart = next);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || !_itemScrollController.isAttached) return;
-      _itemScrollController.jumpTo(
-        index: _listIndex(_windowFrom(count), anchor),
-        alignment: 0,
-      );
+      if (!mounted || !_scroll.hasClients) return;
+      if (oldMax == null || oldPixels == null) return;
+      final double delta = _scroll.position.maxScrollExtent - oldMax;
+      if (delta > 0) _scroll.jumpTo(oldPixels + delta);
     });
   }
 
@@ -277,20 +290,18 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 
   /// 把列表钉到最底部（瞬时，无动画）。
   ///
-  /// `ScrollablePositionedList` 是懒加载的，`maxScrollExtent` 只是估值，
-  /// 按偏移跳会停在中段；只能按条目对齐跳最后一条（alignment 1 = 底边贴视口底）。
+  /// 把列表钉到最底部（瞬时，无动画）。
+  ///
+  /// 普通 `ListView` 的 `maxScrollExtent` 是真实值，直接跳它就等于"最新一行贴底"；
+  /// 之前用 `ScrollablePositionedList` 的按条目对齐在长气泡上贴不住，才会出现
+  /// 「流式时一直回到输入框下方」。
   void _pinToBottom() {
-    if (!mounted || !_itemScrollController.isAttached) return;
-    final count = _state.messages.length;
-    if (count <= 0) return;
-    final from = _windowFrom(count);
-    _itemScrollController.jumpTo(
-      index: _listIndex(from, count - 1),
-      alignment: 1,
-    );
-    // 主动贴底后立即回到"跟随中"：SPL 的 jumpTo 不一定发滚动通知，
-    // 不置 true 的话「回到底部」按钮会一直挂在那儿。
-    _autoFollow.value = true;
+    if (!mounted || !_scroll.hasClients) return;
+    final ScrollPosition p = _scroll.position;
+    if (!p.hasContentDimensions) return;
+    final double target = p.maxScrollExtent;
+    if ((target - p.pixels).abs() > 0.5) p.jumpTo(target);
+    if (!_autoFollow.value) _autoFollow.value = true;
   }
 
   // -------------------------------------------------------------------------
@@ -1352,10 +1363,14 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                 _onMetricsChanged(n.metrics, userDrag: userDrag);
                 return false;
               },
-              child: ScrollablePositionedList.builder(
+              // 用普通 `ListView` + 自己的 ScrollController，而不是
+              // `ScrollablePositionedList`：后者的 `maxScrollExtent` 是懒加载估值，
+              // 按条目对齐（alignment: 1）在气泡比视口高时会**贴不住底**——表现就是
+              // 「流式时一直跳回输入框下方、看不到输出」。普通 ListView 的
+              // `maxScrollExtent` 是真实值，`jumpTo(max)` 才能稳定钉在最新一行。
+              child: ListView.builder(
+                controller: _scroll,
                 itemCount: listCount,
-                itemScrollController: _itemScrollController,
-                itemPositionsListener: _itemPositions,
                 // 页面左右内边距 16（README §3）。
                 padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
                 itemBuilder: (BuildContext context, int index) {
