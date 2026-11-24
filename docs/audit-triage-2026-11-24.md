@@ -1,0 +1,205 @@
+# 审查清单对照：0.4.25 两份问题清单 vs 当前版本（2026-11-24）
+
+- 输入：`Keepsake-0.4.25-工程侧问题清单-20261123.zip`、`Keepsake-0.4.25-设计侧问题清单-20261123.zip`
+- 当前基线：`main` @ `4360e1c`（0.4.26 + 相册 / chip 按压态 / 顶部轻提示 / 文档共 5 个 commit）
+- 方法：源码逐条 grep + 阅读；**本机没有真机**，依赖设备/性能/像素的条目标 `需真机复测`
+- 判定口径：**以当前代码与当前设计资产为准**；旧清单里版本号的出入不算问题
+
+---
+
+## 一、一句话结论
+
+工程 44 条里 **8 条已修、17 条源码可证仍存在、9 条需真机复测、8 条等设计裁决**；
+设计 30 条里 **我抽查的 20 条全部仍存在**，其中 **D-19（`tokens/skin_tokens.dart` 编译不过）是阻断级**，它会污染所有"token 是真值"的结论。
+最有价值的新发现是 4 条（第二节），其中 **N-1 ABI 崩溃在本机实测仍可复现**、**N-2 设计 token 文件仍无法编译**。
+
+---
+
+## 二、旧清单没有、这次新发现的（按严重度）
+
+### N-1（阻断，仍可复现）ABI 崩溃风险没有真正关掉，只靠构建脚本传参
+
+今天我在本机按**默认命令**出包：
+`flutter build apk --release --no-pub --target-platform android-arm64`
+
+`aapt2 dump badging` 结果仍是：
+
+```
+native-code: 'arm64-v8a' 'armeabi-v7a' 'x86_64'
+tar -tf app-release.apk | findstr libflutter → lib/arm64-v8a/libflutter.so  （只有一条）
+```
+
+也就是 E-01 描述的"声明三个 ABI、只放一个 ABI 的引擎库"完全没变。0.4.25 的修复是
+`android/app/build.gradle.kts` 里 `if (keepsakeAbi != null) ndk { abiFilters… }`，
+依赖 `build-abis.cmd` 设置 `ORG_GRADLE_PROJECT_keepsakeAbi`；**任何人不带这个变量出包
+（包括 README 里写的 `flutter build apk --release --target-platform android-arm64`）
+都会重新产出一个 x86_64/armv7 必崩的包**。
+
+建议：`abiFilters` 直接按 Flutter 传进来的 `-Ptarget-platform` 收紧（不再依赖外部脚本），
+并在打包后断言 APK 里 `lib/` 只有目标 ABI；把断言写进构建脚本/CI。
+
+### N-2（阻断，设计侧）`keepsake-design/tokens/skin_tokens.dart` 仍然编译不过
+
+D-19 原样存在：`fsBody` 字段声明两次、构造函数参数也两次（`tokens/skin_tokens.dart:180-181`、`200-201`）。
+这个文件是"唯一允许出现颜色与圆角字面量"的 token 真值，却从未通过 Dart 编译器；
+`check_consistency.py` 只用正则抓值，所以错误一直没暴露。
+
+### N-3（高）chip 高度 SPEC 32 / CSS 36 仍分裂，而且我新加的按压态也按 36 写了
+
+- `SPEC.md` §4.8 与工程 `kChipHeight = 32` 一致；
+- `reference/full.css` 的 `.chip { height: 36px }`（D-10 原样存在）；
+- 今天补的 `.chip:active` 是按 36 的盒子写的。
+
+改 CSS 到 32 时要连按压态一起改，否则"HTML 是唯一真值"会把工程带偏。
+
+### N-4（中）新功能没有任何设计资产，也不在旧清单的验收范围内
+
+相册页（分类抽屉 / 日期分组 / 序号多选）、预览页、图片编辑器、顶部轻提示，
+都只有工程实现 + 我补的 SPEC 段落（§4.8 按压、§4.9 toast），**没有 screens/ 截图、
+没有 HTML 示例屏、没有 UI 测试**。E-44 想接入的设计测试也覆盖不到这些页面。
+
+### N-5（中）E-44 实际上无源可接
+
+设计仓库根目录**没有 `test/` 目录**，清单里提到的 `test/keepsake_ui_test.dart` 在交付包里不存在；
+工程 `test/` 也确实只有 `md_bold_test.dart`。要么设计方补文件，要么这条从验收清单里删掉。
+
+### N-6（中）"以谁为准"仍未落地，而且这次还多了一份要维护的文档
+
+`SPEC.md` §7 仍写"HTML 是唯一真值来源"，但 `check_consistency.py` 喂 `full-chat.html` /
+`full-settings.html` 会各 FAIL 2 项（E/H 的 `fs-title` 16/17 vs dart 15/16）——今天复跑确认。
+我新加的 v3.1/v3.2 规则同时写进 SPEC 与 CSS，等于让"三份真值"变成"四份"。
+
+### N-7（低）发行说明链路仍是 0.4.24
+
+`docs/IMPLEMENTATION-0.4.24.md` 是最新的"发行说明"，今天的 5 个 commit 没有对应发行说明。
+E-03（版本/哈希手写）根因没消除：仍是手写文档，没有从构建产物自动生成。
+
+---
+
+## 三、工程侧 44 条：逐条状态
+
+图例：✅ 已修 · ❌ 仍存在（源码可证）· ⏳ 需真机复测 · ⚖️ 等设计裁决
+
+### A. 阻断
+
+| # | 状态 | 证据（当前代码） |
+|---|---|---|
+| E-01 | ❌ 本次实测仍可复现 | 见 N-1：默认构建产出 3-ABI 声明 + 只有 arm64 引擎库 |
+| E-02 | ⏳ 需真机 | 导入收尾仍在主 isolate；未新增分帧/`PostFrameCallback` 证据 |
+| E-03 | ❌ | `docs/IMPLEMENTATION-0.4.24.md` 仍是最新发行说明；无 0.4.25/0.4.26 |
+
+### B. 高
+
+| # | 状态 | 证据 |
+|---|---|---|
+| E-04 | 部分修 / ⏳ | 已有"正在思考…"状态行（`chat_screen.dart:2145-2164`），但"请求已发、首字节未到"是否立刻出现要真机看 |
+| E-05 | ❌ | `import_task.dart` 无 `cardBackfill` 调用；补建仍只在设置页手动触发 |
+| E-06 | ✅ | `sessions/delete_task.dart:54-58`：单事务失败即整体回滚，注释明确"绝不能退回逐条删除" |
+| E-07 | ❌ | `chat_controller.dart:1834` 仍是 60ms 定时全量通知；`markdown_view.dart:1164` 代码块高亮仍在 build 里跑，无"流式单色"开关 |
+| E-08 | ❌ | `chat_controller.dart:551` 仍 `autoDispose`；`:1122-1126` 先写 `content: ''` 的 ASSISTANT；`_onDispose` 只 cancel |
+| E-09 | ⚖️ | `skin_tokens.dart:219/223` A 的 `pC` 与 `aiBg` 都是 `#A0F2DF`；等 D-17 |
+| E-10 | ❌ | `chat_screen.dart:1189` PopupMenu 只有一项「设置」 |
+| E-11 | ✅ | `_SessionUsageGate`（`chat_screen.dart:1219`） |
+| E-12 | ⚖️ | `sessions_screen.dart:1114-1117`：「pC 实心 + 零描边」，注释说旧 `fabBorder` 已从 token 删；等 D-30 |
+
+### C. 中
+
+| # | 状态 | 证据 |
+|---|---|---|
+| E-13 | ❌ ⚖️ | `markdown_view.dart:682` `fromLTRB(14, 12, 14, 0)`（规范 16/14） |
+| E-14 | ❌ ⚖️ | `chat_screen.dart:1794` `width * 0.76`（规范：用户屏宽−88 / AI 屏宽−56） |
+| E-15 | ❌ | `sessions_screen.dart:849` `Divider(height: 1)` 通栏（规范左缩进 62） |
+| E-16 | ❌ ⚖️ | `sessions_screen.dart:967-976` 竖条 2px；`kSelectionBarWidth = 2` 且**没有任何引用**（`skin_tokens.dart:41`） |
+| E-17 | ⏳ 未复核 | settings 里没搜到 `RadioListTile`（只有 `import_tile.dart:394+`），需逐屏看是否自绘 |
+| E-18 | 部分 | 按压态按 v3.1 新规则复用 `high`（不需要新 token）；`fabLine` 仍缺（与 E-12 同源） |
+| E-19 | ⏳ 未复核 | E 字体预加载路径未逐行看 |
+| E-20 | ⏳ 未复核 | 左滑背景已是 `errorContainer`（`sessions_screen.dart:868`）；确认弹窗按钮配色未核 |
+| E-21 | ⏳ 未复核 | 自动滚动阈值 / 节流 / 新内容浮标未逐行核 |
+| E-22 | 同 E-04 | — |
+| E-23 | ⏳ 未复核 | 输入框常态边框未核 |
+| E-24 | ❌ 疑似 | `update_service.dart` 只见补丁 sha256 校验；完整包下载未见目标 sha256 校验 |
+| E-25 | ⏳ 未复核 | `database.dart` onUpgrade 的 catch 未逐行看 |
+| E-26 | ❌ | `core/api/sse.dart` 无行/事件长度上限 |
+| E-27 | 部分 | CRC 已校验（`zip_reader.dart:307`）、非 UTF-8 已回退（`:363`、`:549-554`）；背压/半截文件未核 |
+| E-28 | ❌ | `delete_task.dart:41` 运行中直接 `return 0`；`sessions_screen.dart:347` 仍无条件 toast「已开始删除」 |
+| E-29 | ✅ | `import_task.dart:143`「正在导入 x / y」 |
+| E-30 | ✅ | `provider_section.dart:560` 转圈 + `:377/379` 成功/失败 toast |
+| E-31 | ❌ ⚖️ | `chat_screen.dart:2840` 仍是 `'$n 轮'`；设计要求「上下文 · 最近 20 轮」 |
+| E-32 | ⏳ 未复核 | 动作条是否缺「分支 / 更多」待逐屏核 |
+| E-33 | ⏳ 需真机 | — |
+| E-34 | ✅ | `import_tile.dart:381`「确认导入历史对话？」 |
+| E-35 | ✅ | `chat_screen.dart:982/3204`「发消息…」 |
+| E-36 | ❌ | `chat_screen.dart:1146` `titleSpacing: 8`（规范 4） |
+| E-37 | ❌ | `theme.dart:607-613` 引用块 decoration；`markdown_view.dart:717-719` |
+| E-38 | ⏳ 未复核 | 朗读项图标↔文字间距未核 |
+| E-39 | ❌ ⚖️ | `skin_tokens.dart:536` E 的 `avatarRadius: 0`（A/H 17）；等 D-05 |
+| E-40 | ❌（低） | `mermaid_block.dart:333` `Color(0x00000000)` |
+| E-41 | ❌ | `pubspec.yaml:6` 仍写"必须与 tag v0.4.14 一致"；`kSelectionBarWidth` 无引用 |
+| E-42 | ✅ 不复现 | 今天 `flutter analyze`（13 条历史告警）**退出码 0** |
+| E-43 | ❌ | `IMPLEMENTATION-0.4.24.md` 仍是唯一发行说明；README 未覆盖今天的 `docs/*.md` |
+| E-44 | ❌ 无源可接 | 设计仓库没有 `test/` 目录，清单提到的测试文件不存在 |
+
+统计：✅ 8（E-06/11/29/30/34/35/42 + E-04 部分）· ❌ 17 · ⏳ 11 · ⚖️ 4（E-09/12/13/14/16/31/39 里部分并入裁决）
+
+---
+
+## 四、设计侧 30 条：抽查结果
+
+| # | 状态 | 证据（当前 `keepsake-design`） |
+|---|---|---|
+| D-01 `--lh` E 1.5 vs 1.7 | ❌ | `SPEC.md:21` 1.5 ↔ `:82` 1.7 |
+| D-02 `--meta-font` | ❌ | `SPEC.md:87` 三套无衬线 ↔ 硬性约束 5 与 §0 说 E 衬线/等宽 |
+| D-03 `--row-h` H 68 vs 78 | ❌ | `SPEC.md:83` 68 ↔ `:96` 78 |
+| D-04 A `--title-w` | ❌ | `SPEC.md:86` 600；token 表该格空；`skin_tokens.dart` A 段无 titleWeight=600 |
+| D-05 `--av-r` 未定义 | ❌ | SPEC §4.2 引用 `--av-r`，token 表无此行；`skin_tokens.dart:223` E `avatarSize: 6, avatarRadius: 6`（6dp 头像不可能） |
+| D-06 `r-send/r-fab/r-sheet` 三套缺值 | ❌ | SPEC §4.5/4.6 引用，token 表无；只有 dart 里有 |
+| D-07 `[N]` 引用样式缺 | ❌ | `full.css` 无 `.cite` |
+| D-08 19 个变量跨来源不一致（E 圆角=H） | ❌ | `skin_tokens.dart` E 小圆角 ↔ `full-*.html` E 全取 H 值 |
+| D-09 屏数多种说法 | ❌ | `reference/index.html:27`「30 个屏」、`:53`「9 张 1360 宽」；SPEC 411×892 |
+| D-10 chip 32 vs 36 | ❌ | SPEC §4.8 32 ↔ `full.css:172` 36 |
+| D-11 chip 图标 15 vs 13–14 | ❌ | SPEC 15 ↔ `docs/icons.md:75`「13–14」 |
+| D-12 抓手 32 vs 36、弹层标题 18 vs `fs-bar` | ❌ | `full.css:227` `.sheet h4 { font-size: var(--fs-bar) }` |
+| D-13 危险按钮配色 | 未复核 | — |
+| D-14 气泡宽度/内距 | 未复核 | — |
+| D-15 竖条 2 vs 3 | ❌ | 与 E-16 同源 |
+| D-16 明度差 8% 不可执行 | ❌ | `SPEC.md:91` 仍未给口径 |
+| D-17 `pC = aiBg` 气泡同色 | ❌ | 设计侧 dart 同值；真机已复现（E-09） |
+| D-18 E 的 `aiBg` 冷薄荷 | ❌ | `skin_tokens.dart`/`SkinColors` E `aiBg #A0F2DF` |
+| D-19 `skin_tokens.dart` 编译不过 | ❌ **阻断** | 见 N-2 |
+| D-20 字体 fallback 字段缺 | ❌（抽查结论） | `skin_tokens.dart` 无 fallback 列表字段 |
+| D-21 icons 清单 21 vs 36 | 未复核 | — |
+| D-22 缺 token（`field-bg`/`code-*`/`usage`/`sel-line`/`fab-line`/`tail`） | ❌ | `full.css` 在用、SPEC/token 表未定义 |
+| D-23 版本号写死 v1.1.0 | ❌ | `reference/full-settings.html:142` |
+| D-24 screens 尺寸说明 | ❌ | 三处说法（1360 / 411×892 / 实测 1360×4690） |
+| D-25 test import 路径不符 | ❌ | 且文件缺失（见 N-5） |
+| D-26–D-29 工具失效 | 未复核 | 这次只跑了 `check_consistency.py`：喂 `full-chat`/`full-settings` 各 FAIL 2 项（D-28 成立） |
+| D-30 FAB 两套写法 | ❌ | `full.css:114` pC 底 + `--fab-line` 描边；SPEC 硬性约束 4 说 surface 底 + `#8CCDBB` |
+
+---
+
+## 五、建议的下一批（按能不能马上做分三档）
+
+**A. 工程可直接修（不需要设计裁决）**
+1. N-1 ABI：`abiFilters` 按 `-Ptarget-platform` 收紧 + 打包后断言（P0）
+2. E-28 并发删除：`start()` 返回 0 时 UI 不要再说"已开始"（P1）
+3. E-26 SSE 长度上限（P2）
+4. E-36 顶栏 `titleSpacing: 8 → 4`（P2）
+5. E-37 引用块 `3px + 底色 → 2px 不铺底`（P2）
+6. E-41 `pubspec.yaml` 注释 / 删 `kSelectionBarWidth`（P2）
+7. E-03/N-7 发行说明：改名 `IMPLEMENTATION-0.4.26.md`，版本/哈希从产物自动生成（P1）
+8. E-24 完整包 sha256 校验（P1，需确认现状）
+
+**B. 设计侧可直接修（自错误，不是裁决）**
+1. N-2/D-19 `tokens/skin_tokens.dart` 重复字段（阻断）
+2. D-10/N-3 `.chip` 36 → 32（连按压态）
+3. D-11 `icons.md` chip 图标 13–14 → 15
+4. D-23 `full-settings.html` 去掉写死的 `v1.1.0`
+5. D-28 `check_consistency.py` 让三份 HTML 都过（或明确只认 `full-list`）
+
+**C. 必须先裁决（不裁决工程会一直"照错实现"）**
+- D-08 / G-0：`HTML` / `skin_tokens.dart` / `SPEC.md` 谁是唯一真值（**这一条不定，下面 20 条都没法定**）
+- E-09/D-17 气泡同色、D-18 E 的 AI 气泡、D-30 FAB 底色+描边、D-16 明度口径
+- E-13/E-14 气泡/正文内距、E-16 竖条 2/3、E-31 chip 文案、D-01/D-03/D-04/D-05/D-06 数值
+
+**D. 只能真机**
+E-02（导入后 ANR）、E-04/E-22（等待反馈）、E-33（气泡右侧 ∨）、E-17/E-19/E-20/E-21/E-23/E-25/E-32/E-38 的未复核项。
