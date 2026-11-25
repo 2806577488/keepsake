@@ -2883,7 +2883,7 @@ class _ComposerTools extends StatelessWidget {
             selected: supportsSearch && searchEnabled,
             disabled: !supportsSearch,
             onTap: onToggleSearch,
-            tooltip: supportsSearch ? '支持联网搜索（DeepSeek 扩展）' : '不支持联网搜索',
+            tooltip: supportsSearch ? '支持联网搜索（方式见设置 › 对话默认）' : '不支持联网搜索',
           ),
           _ToolChip(
             label: supportsThinking

@@ -7,7 +7,8 @@
 ///
 /// 分区（自上而下）：
 /// 1. **AI 平台**：`ProviderSection`（增删改 / 预设 / `/models` / 当前平台）；
-/// 2. **对话默认**：系统提示词、上下文预算、思考强度、深度思考、联网搜索；
+/// 2. **对话默认**：系统提示词、上下文预算、思考强度、深度思考、联网搜索、
+///    联网方式（服务端免费 / 外部 API）；
 /// 3. **用量**：`TotalUsageTile`（全局累计 + 重置）、`PerSessionUsageTile`
 ///    （每个对话的占用）、`BalanceTile`（DeepSeek 官方余额）、`ContextWindowTile`
 ///    （模型上下文窗口，用于计算对话占用率）；
@@ -35,6 +36,7 @@ import 'package:keepsake/core/characters/card_backfill_task.dart';
 import 'package:keepsake/core/characters/card_cleanup_task.dart';
 import 'package:keepsake/core/import/import_task.dart';
 import 'package:keepsake/core/providers.dart';
+import 'package:keepsake/core/search/search_config.dart';
 import 'package:keepsake/core/settings.dart';
 import 'package:keepsake/core/skins.dart' show Skin, keepsakeSkins, skinById;
 import 'package:keepsake/core/theme.dart' show KeepsakeSkinColors, KeepsakeTheme;
@@ -184,6 +186,23 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   static int _parseRounds(String raw) {
     final parsed = int.tryParse(raw.trim()) ?? 0;
     return parsed < 0 ? 0 : parsed;
+  }
+
+  // -------------------------------------------------------------------------
+  // 联网方式（服务端免费 / 外部 API）
+  // -------------------------------------------------------------------------
+
+  /// 打开「联网方式」弹层；保存时整包写回 [WebSearchConfig]。
+  Future<void> _webSearchMode() async {
+    final current = ref.read(settingsProvider).webSearch;
+    final result = await showDialog<WebSearchConfig>(
+      context: context,
+      builder: (dialogContext) => _WebSearchDialog(initial: current),
+    );
+    // 和上面两个弹层一致：不在这里做任何 dispose，交给弹层自身。
+    if (result == null || !mounted) return;
+    await ref.read(settingsProvider.notifier).setWebSearch(result);
+    _toast(result.isExternal ? '已切换到外部 API 联网' : '已切换到服务端免费联网');
   }
 
   // -------------------------------------------------------------------------
@@ -536,10 +555,27 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 s.icon(filled: Icons.language, outlined: Icons.language),
               ),
               title: const Text('联网搜索'),
-              subtitle: const Text('支持联网搜索（DeepSeek 扩展）'),
+              subtitle: const Text('开启后模型可联网；方式见下方“联网方式”'),
               value: settings.searchEnabled,
               onChanged: (value) =>
                   ref.read(settingsProvider.notifier).setSearchEnabled(value),
+            ),
+            ListTile(
+              leading: Icon(
+                s.icon(
+                  filled: Icons.travel_explore,
+                  outlined: Icons.travel_explore_outlined,
+                ),
+              ),
+              title: const Text('联网方式'),
+              // 副标题就是当前生效的方式：服务端免费 / 外部 API + 具体服务名。
+              subtitle: Text(
+                settings.webSearch.isExternal
+                    ? '外部 API · '
+                          '${searchServiceLabel(settings.webSearch.serviceId)}'
+                    : '服务端（免费）· 搜索本身不计费',
+              ),
+              onTap: _webSearchMode,
             ),
             SwitchListTile(
               secondary: const Icon(Icons.auto_awesome_outlined),
@@ -1502,6 +1538,247 @@ class _RadioDot extends StatelessWidget {
               : null,
         ),
       ),
+    );
+  }
+}
+
+/// 「联网方式」弹层：服务端免费 / 外部 API 二选一；选外部时再选搜索服务
+/// （DeepSeek / Tavily / 博查 / Brave / 自定义），并填地址、Key、条数。
+///
+/// 契约在 `core/search/search_config.dart`（只读）：保存时整包回传
+/// [WebSearchConfig]，由 `_SettingsScreenState._webSearchMode` 调 `setWebSearch`。
+/// 语义沿用契约本身：**非自定义服务不存地址**（baseUrl 存空串 = 用该服务的
+/// [kSearchServiceDefaultBase] 默认地址）、Key 留空 = 复用当前聊天平台的 Key
+/// （只有 DeepSeek 官方正确）、条数留空/非数字 = 8（夹在 1–50）。
+class _WebSearchDialog extends StatefulWidget {
+  const _WebSearchDialog({required this.initial});
+
+  /// 打开弹层时的当前配置（取消不改它，保存只在其上 copyWith）。
+  final WebSearchConfig initial;
+
+  @override
+  State<_WebSearchDialog> createState() => _WebSearchDialogState();
+}
+
+class _WebSearchDialogState extends State<_WebSearchDialog> {
+  /// 下拉里可选的服务（顺序 = 契约里的常量顺序 + 自定义收尾）。
+  static const List<String> _serviceIds = <String>[
+    kSearchServiceDeepSeek,
+    kSearchServiceTavily,
+    kSearchServiceBocha,
+    kSearchServiceBrave,
+    kSearchServiceCustom,
+  ];
+
+  late WebSearchMode _mode;
+  late String _serviceId;
+  late final TextEditingController _baseUrlController;
+  late final TextEditingController _apiKeyController;
+  late final TextEditingController _countController;
+
+  @override
+  void initState() {
+    super.initState();
+    final initial = widget.initial;
+    _mode = initial.mode;
+    _serviceId = initial.serviceId;
+    _baseUrlController = TextEditingController(text: initial.baseUrl);
+    _apiKeyController = TextEditingController(text: initial.apiKey);
+    _countController = TextEditingController(text: '${initial.count}');
+  }
+
+  @override
+  void dispose() {
+    // 这三个控制器属于弹层自身（不像系统提示词的 controller 建在弹层外面），
+    // 随 State 释放是安全的。
+    _baseUrlController.dispose();
+    _apiKeyController.dispose();
+    _countController.dispose();
+    super.dispose();
+  }
+
+  /// 保存：serviceId 用下拉选中项；**非自定义服务把地址存空串**（= 用默认地址），
+  /// 自定义服务才保存输入框内容；Key 留空保持空串，条数夹到 1–50。
+  void _save() {
+    final parsed = int.tryParse(_countController.text.trim()) ?? 8;
+    Navigator.of(context).pop(
+      widget.initial.copyWith(
+        mode: _mode,
+        serviceId: _serviceId,
+        baseUrl: _serviceId == kSearchServiceCustom
+            ? _baseUrlController.text.trim()
+            : '',
+        apiKey: _apiKeyController.text.trim(),
+        count: parsed.clamp(1, 50).toInt(),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    // 为什么：标题/说明字号与次要字色都取皮肤 token，换皮肤不用改这份代码。
+    final s = KeepsakeSkinColors.of(context);
+    final external = _mode == WebSearchMode.external;
+    return AlertDialog(
+      shape: RoundedRectangleBorder(borderRadius: s.rSheet),
+      title: const Text('联网方式'),
+      content: SizedBox(
+        width: 520,
+        // 手机横屏 / 小屏时外部表单可能超出一屏，整个内容区可滚动。
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              RadioListTile<WebSearchMode>(
+                value: WebSearchMode.server,
+                groupValue: _mode,
+                onChanged: (value) => setState(
+                  () => _mode = value ?? WebSearchMode.server,
+                ),
+                contentPadding: EdgeInsets.zero,
+                title: Text(
+                  '服务端（免费）',
+                  style: theme.textTheme.bodyLarge?.copyWith(
+                    fontSize: s.fsBody,
+                  ),
+                ),
+                subtitle: Text(
+                  '搜索本身不计费；当前轮输入限 32768 tokens',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    fontSize: s.fsSub,
+                    color: s.c.onV,
+                  ),
+                ),
+              ),
+              RadioListTile<WebSearchMode>(
+                value: WebSearchMode.external,
+                groupValue: _mode,
+                onChanged: (value) => setState(
+                  () => _mode = value ?? WebSearchMode.external,
+                ),
+                contentPadding: EdgeInsets.zero,
+                title: Text(
+                  '外部 API',
+                  style: theme.textTheme.bodyLarge?.copyWith(
+                    fontSize: s.fsBody,
+                  ),
+                ),
+                subtitle: Text(
+                  '外部搜索服务，按次计费；大文档也能联网',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    fontSize: s.fsSub,
+                    color: s.c.onV,
+                  ),
+                ),
+              ),
+              if (external) ...[
+                const SizedBox(height: 8),
+                // 搜索服务：文案全部来自契约的 searchServiceLabel，
+                // 以后新增/改名服务不用改这份 UI。
+                DropdownButtonFormField<String>(
+                  initialValue: _serviceId,
+                  isExpanded: true,
+                  decoration: const InputDecoration(
+                    labelText: '搜索服务',
+                    border: OutlineInputBorder(),
+                  ),
+                  items: <DropdownMenuItem<String>>[
+                    for (final id in _serviceIds)
+                      DropdownMenuItem<String>(
+                        value: id,
+                        child: Text(
+                          searchServiceLabel(id),
+                          style: theme.textTheme.bodyLarge?.copyWith(
+                            fontSize: s.fsBody,
+                          ),
+                        ),
+                      ),
+                  ],
+                  onChanged: (value) => setState(
+                    () => _serviceId = value ?? kSearchServiceDeepSeek,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                // 自定义才给地址输入框；其它服务只显示契约里的默认地址。
+                if (_serviceId == kSearchServiceCustom)
+                  TextField(
+                    controller: _baseUrlController,
+                    keyboardType: TextInputType.url,
+                    decoration: const InputDecoration(
+                      labelText: '服务地址',
+                      hintText: 'https://...',
+                      border: OutlineInputBorder(),
+                    ),
+                  )
+                else
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    child: Text(
+                      '默认地址：${kSearchServiceDefaultBase[_serviceId] ?? ''}',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        fontSize: s.fsSub,
+                        color: s.c.onV,
+                      ),
+                    ),
+                  ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: _apiKeyController,
+                  obscureText: true,
+                  decoration: InputDecoration(
+                    labelText: 'API Key',
+                    // 只有 DeepSeek 官方能复用平台 Key，其它服务要填自己的。
+                    hintText: _serviceId == kSearchServiceDeepSeek
+                        ? '留空则复用当前平台 Key'
+                        : '建议填自己的 Key',
+                    border: const OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: _countController,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                    labelText: '条数',
+                    hintText: '默认 8（可选 1–50）',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                // 说明：非 DeepSeek 服务用自己的 Key；自定义服务要兼容 DeepSeek
+                // Search/Fetch 形状。
+                Text(
+                  '非 DeepSeek 服务需要填自己的 Key；自定义服务需兼容 '
+                  'DeepSeek Search/Fetch 形状'
+                  '（见 docs/web-search-guide-2026-11-25.md）。',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    fontSize: s.fsSub,
+                    color: s.c.onV,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          style: TextButton.styleFrom(
+            minimumSize: const Size(64, KeepsakeTheme.sheetButtonHeight),
+          ),
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('取消'),
+        ),
+        FilledButton(
+          style: FilledButton.styleFrom(
+            minimumSize: const Size(64, KeepsakeTheme.sheetButtonHeight),
+          ),
+          onPressed: _save,
+          child: const Text('保存'),
+        ),
+      ],
     );
   }
 }

@@ -136,7 +136,11 @@ class _SessionsScreenState extends ConsumerState<SessionsScreen> {
     setState(() => _creating = true);
     try {
       final db = ref.read(databaseProvider);
-      final id = await db.createSession();
+      // 新会话继承设置页「对话默认 › 联网搜索」：`sessions.search_enabled` 非空、
+      // DDL 默认 `false`，不显式写就会变成「关」，聊天页也不会再回落全局默认。
+      final id = await db.createSession(
+        searchEnabled: ref.read(settingsProvider).searchEnabled,
+      );
       if (!mounted) return;
       await _openSession(id, initialTitle: '未命名会话');
     } catch (error) {

@@ -16,6 +16,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import '../chat/attachments.dart' show Attachment;
+import '../search/web_search.dart';
 import '../usage/usage.dart';
 import 'chat_backend.dart';
 import 'model_list.dart' show fetchProviderModels, modelsUrlOf;
@@ -27,7 +28,11 @@ class OpenAiClient extends HttpChatBackend {
     required super.provider,
     super.clientFactory,
     super.timeout,
-  });
+    WebSearchService? webSearchService,
+  }) : _injectedSearch = webSearchService;
+
+  /// 测试注入口；不传时用 DeepSeek 官方 Search / Fetch API。
+  final WebSearchService? _injectedSearch;
 
   /// `POST {base}/chat/completions`。
   @override
@@ -68,11 +73,51 @@ class OpenAiClient extends HttpChatBackend {
   /// content block）、`stream`、`max_tokens`、`thinking{type}`、
   /// `reasoning_effort`、`stop`、`tools`、`stream_options.include_usage`。
   Map<String, Object?> buildRequestBody(ChatRequest request) {
+    final body = _baseBody(request, _buildMessages(request));
+    if (request.search) {
+      // 非 DeepSeek 平台仍走服务端工具（老路径）。
+      body['tools'] = _openAiTools();
+    }
+    return body;
+  }
+
+  /// 请求体公共部分（模型、messages、流式开关、思考、`max_tokens`、metadata）。
+  Map<String, Object?> _baseBody(
+    ChatRequest request,
+    List<Map<String, Object?>> messages,
+  ) {
     final model = request.modelName;
     if (model.isEmpty) {
       throw ApiError('先填一个模型名', kind: ApiErrorKind.parse);
     }
+    final body = <String, Object?>{
+      'model': model,
+      'messages': messages,
+      'stream': true,
+      'stream_options': <String, Object?>{'include_usage': true},
+    };
+    final maxTokens = request.maxTokens;
+    if (maxTokens != null && maxTokens > 0) {
+      body['max_tokens'] = maxTokens;
+    }
+    ensureReasoning(
+      body,
+      enabled: request.thinking,
+      thinkingLevel: request.thinkingLevel,
+    );
+    final stop = request.stop;
+    if (stop != null && stop.isNotEmpty) {
+      body['stop'] = stop;
+    }
+    final metadata = request.metadata;
+    if (metadata != null && metadata.isNotEmpty) {
+      body['metadata'] = metadata;
+    }
+    return body;
+  }
 
+  /// 历史轮 + system + 附件 → Chat Completions `messages`。
+  List<Map<String, Object?>> _buildMessages(ChatRequest request) {
     final messages = <Map<String, Object?>>[];
     // 附件只挂在最后一条 user 消息上（多轮时不能挂到别人头上）。
     int? lastUserIndex;
@@ -96,36 +141,8 @@ class OpenAiClient extends HttpChatBackend {
       messages.add(message);
       if (turn.isUser) lastUserIndex = messages.length - 1;
     }
-
-    final body = <String, Object?>{
-      'model': model,
-      'messages': messages,
-      'stream': true,
-      'stream_options': <String, Object?>{'include_usage': true},
-    };
-
-    final maxTokens = request.maxTokens;
-    if (maxTokens != null && maxTokens > 0) {
-      body['max_tokens'] = maxTokens;
-    }
-    ensureReasoning(
-      body,
-      enabled: request.thinking,
-      thinkingLevel: request.thinkingLevel,
-    );
-    final stop = request.stop;
-    if (stop != null && stop.isNotEmpty) {
-      body['stop'] = stop;
-    }
-    if (request.search) {
-      body['tools'] = _openAiTools();
-    }
-    final metadata = request.metadata;
-    if (metadata != null && metadata.isNotEmpty) {
-      body['metadata'] = metadata;
-    }
     _attachFilesToLastUser(messages, request.attachments, lastUserIndex);
-    return body;
+    return messages;
   }
 
   Map<String, String> _requestHeaders() {
@@ -154,12 +171,495 @@ class OpenAiClient extends HttpChatBackend {
     final client = openClient();
     late final StreamController<ChatEvent> controller;
     controller = StreamController<ChatEvent>(
-      onListen: () => unawaited(_pump(request, controller, client)),
+      onListen: () => unawaited(
+        _usesClientSearch(request)
+            ? _pumpClientTools(request, controller, client)
+            : _pump(request, controller, client),
+      ),
       // 同步 abort：cancel() 里没有 await，返回的 future 已立即完成。
       onCancel: () => unawaited(cancel()),
     );
     return controller.stream;
   }
+
+  // -------------------------------------------------------------------
+  // 客户端联网工具（DeepSeek Search / Fetch API）
+  // -------------------------------------------------------------------
+
+  /// 联网改为**客户端 function 工具**：模型自己决定搜什么，App 调外部
+  /// Search / Fetch API（`$kMaxToolRounds` 轮以内）。
+  ///
+  /// 为什么不用服务端工具：一旦声明 `deepseek_web_search` / `deepseek_read_url`，
+  /// 请求就进入 DeepSeek 的扩展模式，**当前这一轮最后一条 user 消息被限制在
+  /// 32768 tokens**（2026-11-25 实测：385K tokens 的 PDF 直接 400）。
+  static const String _kClientToolSearch = 'web_search';
+  static const String _kClientToolReadUrl = 'read_url';
+  static const int _kMaxToolRounds = 4;
+  static const int _kToolResultMaxChars = 12000;
+
+  bool get _isDeepSeekProvider =>
+      normalizedBase.toLowerCase().contains('api.deepseek.com');
+
+  /// 外部搜索服务的 Key：只有 DeepSeek 平台才复用平台 Key。
+  String get _searchFallbackKey => _isDeepSeekProvider ? apiKey : '';
+
+  bool _usesClientSearch(ChatRequest request) {
+    if (!request.search) return false;
+    final config = request.webSearch;
+    if (config == null || !config.isExternal) return false;
+    // 外部服务没配好（缺地址/Key）时退回服务端免费工具，而不是直接报错。
+    final base = config.effectiveBaseUrl;
+    final key = config.effectiveApiKey(_searchFallbackKey);
+    return base.isNotEmpty && key.isNotEmpty;
+  }
+
+  Future<void> _pumpClientTools(
+    ChatRequest request,
+    StreamController<ChatEvent> controller,
+    http.Client client,
+  ) async {
+    final config = request.webSearch ??
+        const WebSearchConfig(mode: WebSearchMode.external);
+    final injected = _injectedSearch;
+    final search = injected ??
+        webSearchServiceFor(config, fallbackApiKey: _searchFallbackKey);
+    if (search == null) {
+      // 理论到不了（_usesClientSearch 已校验）；兜底按服务端工具走。
+      await _pump(request, controller, client);
+      return;
+    }
+    try {
+      final messages = _buildMessages(request);
+      for (var round = 0; round < _kMaxToolRounds; round++) {
+        if (isCancelled || controller.isClosed) return;
+        // 最后一轮不再给工具：强制模型基于已有结果作答，避免轮数用尽没正文。
+        final allowTools = round < _kMaxToolRounds - 1;
+        final result = await _sendRound(
+          request,
+          client,
+          messages,
+          controller,
+          allowTools: allowTools,
+          withReadUrl: search.supportsFetch,
+        );
+        if (isCancelled || controller.isClosed) return;
+        if (!result.wantsTools) {
+          controller.add(Done(finishReason: result.finishReason));
+          return;
+        }
+        final calls = result.toolCalls;
+        final assistant = <String, Object?>{
+          'role': 'assistant',
+          'content': result.text.isEmpty ? null : result.text,
+          'tool_calls': <Map<String, Object?>>[
+            for (final call in calls)
+              <String, Object?>{
+                'id': call.id,
+                'type': 'function',
+                'function': <String, Object?>{
+                  'name': call.name,
+                  'arguments': call.arguments.toString(),
+                },
+              },
+          ],
+        };
+        // 思考模式下带 tools 的请求必须回传 reasoning_content（官方要求）。
+        if (request.thinking && result.reasoning.trim().isNotEmpty) {
+          assistant['reasoning_content'] = result.reasoning;
+        }
+        messages.add(assistant);
+        for (final call in calls) {
+          final content = await _executeToolCall(
+            call,
+            search,
+            controller,
+            count: config.count,
+          );
+          if (isCancelled || controller.isClosed) return;
+          messages.add(<String, Object?>{
+            'role': 'tool',
+            'tool_call_id': call.id,
+            'content': content,
+          });
+        }
+      }
+      // 轮数用尽：把最后一轮的回答当作结束，避免死循环。
+      if (!controller.isClosed) {
+        controller.add(Done(finishReason: 'max_tool_rounds'));
+      }
+    } on ApiError catch (error, stackTrace) {
+      _report(controller, error, stackTrace);
+    } on TimeoutException catch (error, stackTrace) {
+      _report(controller, ApiError.timeout(error), stackTrace);
+    } on http.ClientException catch (error, stackTrace) {
+      _report(controller, ApiError.network(error), stackTrace);
+    } catch (error, stackTrace) {
+      _report(controller, ApiError.network(error), stackTrace);
+    } finally {
+      // 测试注入的 service 由调用方负责释放。
+      if (injected == null) search.dispose();
+      releaseClient(client);
+      if (!controller.isClosed) unawaited(controller.close());
+    }
+  }
+
+  Future<_RoundResult> _sendRound(
+    ChatRequest request,
+    http.Client client,
+    List<Map<String, Object?>> messages,
+    StreamController<ChatEvent> controller, {
+    bool allowTools = true,
+    bool withReadUrl = true,
+  }) async {
+    final body = _baseBody(request, messages);
+    // 最后一轮不带工具：让模型必须给正文，而不是继续无限搜索。
+    if (allowTools) {
+      body['tools'] = _clientTools(withReadUrl: withReadUrl);
+    }
+    final httpRequest = http.Request('POST', _parseChatUri())
+      ..headers.addAll(_requestHeaders())
+      ..body = jsonEncode(body);
+    final response = await sendStreamed(
+      client,
+      httpRequest,
+      timeout: request.timeout,
+    );
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      final errorBody = await response.stream.bytesToString();
+      throw apiErrorFromStatus(response.statusCode, errorBody);
+    }
+    if (isCancelled || controller.isClosed) {
+      return const _RoundResult(
+        text: '',
+        reasoning: '',
+        toolCalls: <_ToolCall>[],
+      );
+    }
+    final contentType = response.headers['content-type'];
+    if (!HttpChatBackend.isEventStreamContentType(contentType)) {
+      final text = await response.stream.bytesToString();
+      return _roundFromNonStream(text, controller);
+    }
+    return _roundFromSse(response.stream, controller);
+  }
+
+  /// 解析一轮 SSE：累积正文 / 思考 / `tool_calls` 分片，并实时把增量发给 UI。
+  Future<_RoundResult> _roundFromSse(
+    Stream<List<int>> stream,
+    StreamController<ChatEvent> controller,
+  ) async {
+    final text = StringBuffer();
+    final reasoning = StringBuffer();
+    final calls = <int, _ToolCall>{};
+    String? finishReason;
+    var sawAny = false;
+    await for (final event in parseSse(
+      stream,
+      isTerminator: isOpenAiTerminator,
+      interruptedMessage: sseInterruptedMessage,
+    )) {
+      if (isCancelled) break;
+      if (event.isDone) break;
+      final json = event.json;
+      if (json == null) continue;
+      sawAny = true;
+      final errorNode = json['error'];
+      if (errorNode != null) {
+        final detail = extractApiErrorDetail(jsonEncode(<String, Object?>{
+              'error': errorNode,
+            })) ??
+            errorNode.toString();
+        throw ApiError(detail, kind: ApiErrorKind.http);
+      }
+      final choices = json['choices'];
+      if (choices is List && choices.isNotEmpty && choices.first is Map) {
+        final choice = Map<String, Object?>.from(choices.first as Map);
+        final deltaNode = choice['delta'] ?? choice['message'];
+        if (deltaNode is Map) {
+          final delta = Map<String, Object?>.from(deltaNode);
+          final reasoningDelta = delta['reasoning_content'] ?? delta['reasoning'];
+          if (reasoningDelta is String && reasoningDelta.isNotEmpty) {
+            reasoning.write(reasoningDelta);
+            if (!controller.isClosed) controller.add(ThinkingDelta(reasoningDelta));
+          }
+          final content = delta['content'];
+          if (content is String && content.isNotEmpty) {
+            text.write(content);
+            if (!controller.isClosed) controller.add(TextDelta(content));
+          } else if (content is List) {
+            for (final part in content) {
+              final partText = _contentPartText(part);
+              if (partText.isEmpty) continue;
+              text.write(partText);
+              if (!controller.isClosed) controller.add(TextDelta(partText));
+            }
+          }
+          final toolDeltas = delta['tool_calls'];
+          if (toolDeltas is List) {
+            for (final raw in toolDeltas) {
+              if (raw is! Map) continue;
+              final map = Map<String, Object?>.from(raw);
+              final index = map['index'] is num
+                  ? (map['index'] as num).toInt()
+                  : calls.length;
+              final call = calls.putIfAbsent(index, () => _ToolCall());
+              final id = map['id'];
+              if (id is String && id.trim().isNotEmpty) call.id = id.trim();
+              final function = map['function'];
+              if (function is Map) {
+                final name = function['name'];
+                if (name is String && name.trim().isNotEmpty) {
+                  call.name = name.trim();
+                }
+                final arguments = function['arguments'];
+                if (arguments is String) call.arguments.write(arguments);
+              }
+            }
+          }
+        }
+        final reason = choice['finish_reason'];
+        if (reason != null) finishReason = reason.toString();
+      }
+      final usage = parseUsage(json);
+      if (usage != null && !controller.isClosed) controller.add(Usage(usage));
+    }
+    if (!sawAny) {
+      throw ApiError(kUnparsableNonStreamMessage, kind: ApiErrorKind.parse);
+    }
+    return _RoundResult(
+      text: text.toString(),
+      reasoning: reasoning.toString(),
+      toolCalls: _orderedCalls(calls),
+      finishReason: finishReason,
+    );
+  }
+
+  /// 非流式回退（平台忽略 `stream: true` 时）。
+  _RoundResult _roundFromNonStream(
+    String body,
+    StreamController<ChatEvent> controller,
+  ) {
+    final json = HttpChatBackend.decodeJsonObject(body);
+    final errorNode = json['error'];
+    if (errorNode != null) {
+      throw ApiError(
+        extractApiErrorDetail(body) ?? errorNode.toString(),
+        kind: ApiErrorKind.http,
+      );
+    }
+    final choices = json['choices'];
+    if (choices is! List || choices.isEmpty || choices.first is! Map) {
+      throw ApiError(kUnparsableNonStreamMessage, kind: ApiErrorKind.parse);
+    }
+    final choice = Map<String, Object?>.from(choices.first as Map);
+    final messageNode = choice['message'] ?? choice['delta'];
+    final text = StringBuffer();
+    final reasoning = StringBuffer();
+    final calls = <_ToolCall>[];
+    if (messageNode is Map) {
+      final message = Map<String, Object?>.from(messageNode);
+      final reasoningDelta = message['reasoning_content'] ?? message['reasoning'];
+      if (reasoningDelta is String && reasoningDelta.isNotEmpty) {
+        reasoning.write(reasoningDelta);
+        if (!controller.isClosed) controller.add(ThinkingDelta(reasoningDelta));
+      }
+      final content = message['content'];
+      if (content is String && content.isNotEmpty) {
+        text.write(content);
+        if (!controller.isClosed) controller.add(TextDelta(content));
+      } else if (content is List) {
+        for (final part in content) {
+          final partText = _contentPartText(part);
+          if (partText.isEmpty) continue;
+          text.write(partText);
+          if (!controller.isClosed) controller.add(TextDelta(partText));
+        }
+      }
+      final toolCalls = message['tool_calls'];
+      if (toolCalls is List) {
+        for (final raw in toolCalls) {
+          if (raw is! Map) continue;
+          final map = Map<String, Object?>.from(raw);
+          final call = _ToolCall();
+          final id = map['id'];
+          if (id is String) call.id = id.trim();
+          final function = map['function'];
+          if (function is Map) {
+            final name = function['name'];
+            if (name is String) call.name = name.trim();
+            final arguments = function['arguments'];
+            if (arguments is String) call.arguments.write(arguments);
+          }
+          calls.add(call);
+        }
+      }
+    }
+    final usage = parseUsage(json);
+    if (usage != null && !controller.isClosed) controller.add(Usage(usage));
+    return _RoundResult(
+      text: text.toString(),
+      reasoning: reasoning.toString(),
+      toolCalls: calls,
+      finishReason: choice['finish_reason']?.toString(),
+    );
+  }
+
+  static List<_ToolCall> _orderedCalls(Map<int, _ToolCall> calls) {
+    final indexes = calls.keys.toList()..sort();
+    final ordered = <_ToolCall>[];
+    for (var i = 0; i < indexes.length; i++) {
+      final call = calls[indexes[i]]!;
+      if (call.id.isEmpty) call.id = 'call_${i + 1}';
+      if (call.name.isEmpty) call.name = _kClientToolSearch;
+      ordered.add(call);
+    }
+    return ordered;
+  }
+
+  /// 执行一个工具调用并把结果回填给模型（失败也回填，让模型自己兜底）。
+  Future<String> _executeToolCall(
+    _ToolCall call,
+    WebSearchService search,
+    StreamController<ChatEvent> controller, {
+    int count = 8,
+  }) async {
+    final args = _toolArguments(call.arguments.toString());
+    if (call.name == _kClientToolSearch) {
+      final query = (args['query'] ?? '').toString().trim();
+      if (query.isEmpty) return '缺少 query 参数，请重新调用。';
+      if (!controller.isClosed) {
+        controller.add(
+          ToolResult(tool: kToolWebSearch, running: true, query: query),
+        );
+      }
+      try {
+        final items = await search.search(query, count: count);
+        if (!controller.isClosed) {
+          controller.add(ToolResult(
+            tool: kToolWebSearch,
+            running: false,
+            query: query,
+            sources: <SearchSource>[
+              for (final item in items)
+                SearchSource(
+                  url: item.url,
+                  title: item.title,
+                  snippet: item.snippet ?? item.summary,
+                  siteName: item.siteName,
+                  publishedAt: item.publishedAt,
+                ),
+            ],
+          ));
+        }
+        if (items.isEmpty) return '没有搜到结果，可以换个关键词，或直接回答。';
+        return items
+            .asMap()
+            .entries
+            .map((entry) => entry.value.toModelText(
+                  index: entry.key + 1,
+                  maxContentChars: 2000,
+                ))
+            .join('\n\n');
+      } catch (error) {
+        if (!controller.isClosed) {
+          controller.add(
+            ToolResult(tool: kToolWebSearch, running: false, query: query),
+          );
+        }
+        return '联网搜索失败：${error is ApiError ? error.message : error}';
+      }
+    }
+    if (call.name == _kClientToolReadUrl) {
+      final url = (args['url'] ?? '').toString().trim();
+      if (url.isEmpty) return '缺少 url 参数，请重新调用。';
+      if (!controller.isClosed) {
+        controller.add(ToolResult(tool: kToolReadUrl, running: true, query: url));
+      }
+      try {
+        final page = await search.fetchPage(url);
+        if (!controller.isClosed) {
+          controller.add(ToolResult(
+            tool: kToolReadUrl,
+            running: false,
+            query: url,
+            sources: <SearchSource>[
+              SearchSource(url: url, title: page.title),
+            ],
+          ));
+        }
+        return '${page.title ?? url}\n$url\n\n'
+            '${_clip(page.content, _kToolResultMaxChars)}';
+      } catch (error) {
+        if (!controller.isClosed) {
+          controller.add(
+            ToolResult(tool: kToolReadUrl, running: false, query: url),
+          );
+        }
+        return '读取链接失败：${error is ApiError ? error.message : error}';
+      }
+    }
+    return '未知工具：${call.name}';
+  }
+
+  /// function 工具声明（普通 OpenAI `type: function`，不触发扩展模式）。
+  ///
+  /// [withReadUrl] 为 false 时（博查 / Brave 只有搜索）不声明 `read_url`。
+  static List<Map<String, Object?>> _clientTools({
+    required bool withReadUrl,
+  }) =>
+      <Map<String, Object?>>[
+        <String, Object?>{
+          'type': 'function',
+          'function': <String, Object?>{
+            'name': _kClientToolSearch,
+            'description': '联网搜索网页。需要最新信息、外部资料或核实事实时调用；'
+                'query 用关键词，不要写成整段问题。',
+            'parameters': <String, Object?>{
+              'type': 'object',
+              'properties': <String, Object?>{
+                'query': <String, Object?>{
+                  'type': 'string',
+                  'description': '搜索关键词',
+                },
+              },
+              'required': <String>['query'],
+            },
+          },
+        },
+        if (withReadUrl)
+          <String, Object?>{
+            'type': 'function',
+            'function': <String, Object?>{
+              'name': _kClientToolReadUrl,
+              'description': '读取一个网页的正文（Markdown）。需要看某个链接的具体内容时调用。',
+              'parameters': <String, Object?>{
+                'type': 'object',
+                'properties': <String, Object?>{
+                  'url': <String, Object?>{
+                    'type': 'string',
+                    'description': '要读取的 http(s) 链接',
+                  },
+                },
+                'required': <String>['url'],
+              },
+            },
+          },
+      ];
+
+  static Map<String, Object?> _toolArguments(String raw) {
+    final text = raw.trim();
+    if (text.isEmpty) return const <String, Object?>{};
+    try {
+      final decoded = jsonDecode(text);
+      if (decoded is Map) return Map<String, Object?>.from(decoded);
+    } catch (_) {
+      // 模型偶尔给非法 JSON：按空参数处理，让模型重试。
+    }
+    return const <String, Object?>{};
+  }
+
+  static String _clip(String text, int maxChars) =>
+      text.length <= maxChars ? text : '${text.substring(0, maxChars)}…';
 
   Future<void> _pump(
     ChatRequest request,
@@ -595,3 +1095,29 @@ class OpenAiClient extends HttpChatBackend {
     ];
   }
 }
+
+/// 流式累积中的一个 `tool_calls` 分片。
+final class _ToolCall {
+  String id = '';
+  String name = '';
+  final StringBuffer arguments = StringBuffer();
+}
+
+/// 一轮响应的解析结果（正文 / 思考 / 工具调用 / 结束原因）。
+final class _RoundResult {
+  const _RoundResult({
+    required this.text,
+    required this.reasoning,
+    required this.toolCalls,
+    this.finishReason,
+  });
+
+  final String text;
+  final String reasoning;
+  final List<_ToolCall> toolCalls;
+  final String? finishReason;
+
+  bool get wantsTools =>
+      finishReason == 'tool_calls' && toolCalls.isNotEmpty;
+}
+

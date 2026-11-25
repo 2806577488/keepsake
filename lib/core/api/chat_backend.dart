@@ -18,6 +18,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import '../chat/attachments.dart';
+import '../search/search_config.dart';
 import '../usage/usage.dart';
 import 'anthropic_client.dart';
 import 'openai_client.dart';
@@ -275,6 +276,7 @@ class ChatRequest {
     this.thinking = false,
     this.thinkingLevel,
     this.search = false,
+    this.webSearch,
     this.stop,
     this.metadata,
     this.timeout,
@@ -299,8 +301,11 @@ class ChatRequest {
   /// 思考档位：'低'/'中'/'高' 字符串，或 Settings 里可能存的 int（0=关/1/2/3）。
   final Object? thinkingLevel;
 
-  /// 联网搜索（DeepSeek 扩展工具）。
+  /// 联网搜索（服务端工具 / 外部 API 由 ChatRequest.webSearch 决定）。
   final bool search;
+
+  /// 联网方式与外部服务配置（`null` = 服务端免费联网工具）。
+  final WebSearchConfig? webSearch;
 
   final List<String>? stop;
   final Map<String, Object?>? metadata;
@@ -328,6 +333,7 @@ class ChatRequest {
     bool? thinking,
     Object? thinkingLevel,
     bool? search,
+    WebSearchConfig? webSearch,
     List<String>? stop,
     Map<String, Object?>? metadata,
     Duration? timeout,
@@ -342,6 +348,7 @@ class ChatRequest {
         thinking: thinking ?? this.thinking,
         thinkingLevel: thinkingLevel ?? this.thinkingLevel,
         search: search ?? this.search,
+        webSearch: webSearch ?? this.webSearch,
         stop: stop ?? this.stop,
         metadata: metadata ?? this.metadata,
         timeout: timeout ?? this.timeout,

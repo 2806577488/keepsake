@@ -20,6 +20,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'api/provider_models.dart' show kDefaultModelName;
+import 'search/search_config.dart';
 import 'skins.dart' show kDefaultSkinId, skinById;
 
 /// 默认 system prompt（prompts.md §1 原文 [确定]）。
@@ -100,6 +101,7 @@ class Settings {
     this.thinkingLevel = ThinkingLevel.medium,
     this.thinkingEnabled = false,
     this.searchEnabled = false,
+    this.webSearch = const WebSearchConfig(),
     this.themeMode = ThemeMode.system,
     this.skinId = kDefaultSkinId,
     this.ttsSpeed = 1.0,
@@ -134,6 +136,9 @@ class Settings {
 
   /// 联网搜索默认值。
   final bool searchEnabled;
+
+  /// 联网方式（服务端免费工具 / 外部 Search API）与外部服务配置。
+  final WebSearchConfig webSearch;
 
   /// 深浅色。
   final ThemeMode themeMode;
@@ -182,6 +187,7 @@ class Settings {
     ThinkingLevel? thinkingLevel,
     bool? thinkingEnabled,
     bool? searchEnabled,
+    WebSearchConfig? webSearch,
     ThemeMode? themeMode,
     String? skinId,
     double? ttsSpeed,
@@ -199,6 +205,7 @@ class Settings {
       thinkingLevel: thinkingLevel ?? this.thinkingLevel,
       thinkingEnabled: thinkingEnabled ?? this.thinkingEnabled,
       searchEnabled: searchEnabled ?? this.searchEnabled,
+      webSearch: webSearch ?? this.webSearch,
       themeMode: themeMode ?? this.themeMode,
       skinId: skinId ?? this.skinId,
       ttsSpeed: ttsSpeed ?? this.ttsSpeed,
@@ -219,6 +226,7 @@ class Settings {
     'thinking_level': thinkingLevel.wireName,
     'thinking_enabled': thinkingEnabled,
     'search_enabled': searchEnabled,
+    'web_search': webSearch.toJson(),
     'theme': themeMode.name,
     'skin_id': skinId,
     'tts_speed': ttsSpeed,
@@ -247,6 +255,9 @@ class Settings {
       thinkingEnabled:
           _bool(json, 'thinking_enabled', 'thinkingEnabled') ?? false,
       searchEnabled: _bool(json, 'search_enabled', 'searchEnabled') ?? false,
+      webSearch: WebSearchConfig.fromJson(
+        json['web_search'] ?? json['webSearch'],
+      ),
       themeMode: _themeMode(_str(json, 'theme', 'theme_mode', 'themeMode')),
       // 皮肤 id 走注册表校验：未知 / 空值回退第一套，不抛异常。
       skinId: skinById(_str(json, 'skin_id', 'skinId')).id,
@@ -273,6 +284,7 @@ class Settings {
       other.thinkingLevel == thinkingLevel &&
       other.thinkingEnabled == thinkingEnabled &&
       other.searchEnabled == searchEnabled &&
+      other.webSearch == webSearch &&
       other.themeMode == themeMode &&
       other.skinId == skinId &&
       other.ttsSpeed == ttsSpeed &&
@@ -291,6 +303,7 @@ class Settings {
     thinkingLevel,
     thinkingEnabled,
     searchEnabled,
+    webSearch,
     themeMode,
     skinId,
     ttsSpeed,
@@ -377,6 +390,7 @@ class SettingsStore extends ChangeNotifier {
     ThinkingLevel? thinkingLevel,
     bool? thinkingEnabled,
     bool? searchEnabled,
+    WebSearchConfig? webSearch,
     ThemeMode? themeMode,
     String? skinId,
     double? ttsSpeed,
@@ -394,6 +408,7 @@ class SettingsStore extends ChangeNotifier {
       thinkingLevel: thinkingLevel,
       thinkingEnabled: thinkingEnabled,
       searchEnabled: searchEnabled,
+      webSearch: webSearch,
       themeMode: themeMode,
       skinId: skinId,
       ttsSpeed: ttsSpeed,
@@ -471,6 +486,10 @@ class SettingsController extends Notifier<Settings> {
 
   Future<void> setSearchEnabled(bool enabled) =>
       store.patch(searchEnabled: enabled);
+
+  /// 联网方式 / 外部服务配置。
+  Future<void> setWebSearch(WebSearchConfig config) =>
+      store.patch(webSearch: config);
 
   Future<void> setThemeMode(ThemeMode mode) => store.patch(themeMode: mode);
 

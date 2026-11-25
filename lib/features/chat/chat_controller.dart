@@ -39,6 +39,7 @@ import '../../core/chat/context_builder.dart';
 import '../../core/chat/summarizer.dart';
 import '../../core/import/import_task.dart';
 import '../../core/providers.dart';
+import '../../core/search/search_config.dart';
 import '../../core/usage/usage_store.dart';
 
 // ---------------------------------------------------------------------------
@@ -1391,8 +1392,36 @@ class ChatController extends Notifier<ChatUiState> {
       thinking: _thinkingEnabled && provider.supportsThinking,
       thinkingLevel: _effectiveThinkingLevel.label,
       search: _searchEnabled && provider.supportsSearch,
+      webSearch: _webSearchConfigFor(provider, turnAttachments),
       attachments: turnAttachments,
     );
+  }
+
+  /// 本轮用哪种联网方式。
+  ///
+  /// - 默认「服务端免费联网工具」（搜索本身不计费）；
+  /// - 设置里选了「外部 API」→ 一直走外部；
+  /// - 服务端模式但本轮带文档：文档解析后可能超过扩展模式的 32768 限制，
+  ///   自动切外部（外部未配置时仍回退服务端）。
+  WebSearchConfig _webSearchConfigFor(
+    AiProvider provider,
+    List<attachments.Attachment> turnAttachments,
+  ) {
+    final settings = ref.read(settingsProvider);
+    final configured = settings.webSearch;
+    // 只有 DeepSeek 平台才复用平台 Key 当搜索 Key。
+    final fallbackKey =
+        provider.baseUrl.toLowerCase().contains('api.deepseek.com')
+            ? provider.apiKey
+            : '';
+    final ready = configured.effectiveBaseUrl.isNotEmpty &&
+        configured.effectiveApiKey(fallbackKey).isNotEmpty;
+    if (!ready) return const WebSearchConfig();
+    if (configured.isExternal) return configured;
+    if (turnAttachments.isNotEmpty) {
+      return configured.copyWith(mode: WebSearchMode.external);
+    }
+    return configured;
   }
 
   /// 设置 → 大脑配置（只搬三个开关；细项用 `BrainConfig` 默认值）。

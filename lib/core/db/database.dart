@@ -537,12 +537,17 @@ class AppDatabase extends _$AppDatabase {
   ///
   /// [presetId] / [model] 目前仅**接收**不落库：db-schema §2 的 sessions 表没有这两列
   /// （会话级平台/模型由 ChatController 在内存里持有）。
+  ///
+  /// [searchEnabled] 是会话级联网搜索的**初始值**：调用方传设置页「对话默认」里的
+  /// 默认值，新会话才会一开始就是打开的。这一列非空、DDL 默认 `false`，不传就等于
+  /// 「关」；`ChatController` 读到 `false` 会当成会话级选择，不再回落到全局设置。
   Future<String> createSession({
     String? id,
     String? title,
     String? presetId,
     String? model,
     String? characterId,
+    bool? searchEnabled,
   }) async {
     final sessionId = (id == null || id.isEmpty) ? const Uuid().v4() : id;
     final now = DateTime.now();
@@ -553,6 +558,9 @@ class AppDatabase extends _$AppDatabase {
         createdAt: Value(now),
         updatedAt: Value(now),
         characterId: Value(characterId),
+        searchEnabled: searchEnabled == null
+            ? const Value<bool>.absent()
+            : Value<bool>(searchEnabled),
       ),
     );
     return sessionId;

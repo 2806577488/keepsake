@@ -19,6 +19,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import '../chat/attachments.dart' show Attachment;
+import '../search/web_search.dart';
 import '../usage/usage.dart';
 import 'chat_backend.dart';
 import 'model_list.dart'
@@ -47,7 +48,11 @@ class AnthropicClient extends HttpChatBackend {
     required super.provider,
     super.clientFactory,
     super.timeout,
-  });
+    WebSearchService? webSearchService,
+  }) : _injectedSearch = webSearchService;
+
+  /// 测试注入口；不传时按 [WebSearchConfig] 构造 DeepSeek 官方 Search / Fetch。
+  final WebSearchService? _injectedSearch;
 
   /// Anthropic 兼容基址。
   ///
@@ -112,58 +117,43 @@ class AnthropicClient extends HttpChatBackend {
   /// 支持的 key：`model`、`messages`、`system`、`max_tokens`、`stream`、
   /// `thinking{type}`、`output_config{effort}`、`tools`、`stop_sequences`、
   /// `metadata`。
+  ///
+  /// [ChatRequest.webSearch] 为外部联网（客户端工具）时**不声明**服务端
+  /// `deepseek_web_search` / `deepseek_read_url`：工具改由
+  /// `_sendRound` 每轮按 Anthropic 普通工具形状单独声明，避免进入扩展模式
+  /// （扩展模式会把当前轮 user 消息限制在 32768 tokens）。
   Map<String, Object?> buildRequestBody(ChatRequest request) {
+    final body = _baseBody(request, _buildMessages(request));
+    // 服务端免费联网工具（老路径）：只有非 external 模式才声明。
+    if (request.search && !_usesClientSearch(request)) {
+      body['tools'] = deepSeekSearchTools();
+    }
+    return body;
+  }
+
+  /// 请求体公共部分（模型、messages、流式开关、思考、`max_tokens`、metadata）。
+  ///
+  /// 不含 `tools`：服务端工具 / 客户端工具由调用方决定声明哪一种。
+  Map<String, Object?> _baseBody(
+    ChatRequest request,
+    List<Map<String, Object?>> messages,
+  ) {
     final model = request.modelName;
     if (model.isEmpty) {
       throw ApiError('先填一个模型名', kind: ApiErrorKind.parse);
     }
 
-    final systemParts = <String>[];
-    final system = request.effectiveSystemPrompt;
-    if (system.isNotEmpty) systemParts.add(system);
-
-    final messages = <Map<String, Object?>>[];
-    final pendingAttachments = <Attachment>[
-      for (final attachment in request.attachments)
-        if ((attachment.fileId ?? '').trim().isNotEmpty) attachment,
-    ];
-
-    // 附件只挂到最后一条 user 消息上（挂到 assistant 会被 400）。
-    var lastUserIndex = -1;
-    for (var i = 0; i < request.messages.length; i++) {
-      if (request.messages[i].isUser) lastUserIndex = i;
-    }
-
-    for (var i = 0; i < request.messages.length; i++) {
-      final turn = request.messages[i];
-      if (turn.isSystem) {
-        final content = turn.content.trim();
-        if (content.isNotEmpty) systemParts.add(content);
-        continue;
-      }
-      if (turn.content.trim().isEmpty) continue;
-      final attachHere = i == lastUserIndex && pendingAttachments.isNotEmpty;
-      messages.add(<String, Object?>{
-        'role': turn.isAssistant ? 'assistant' : 'user',
-        'content': attachHere
-            ? _userContentWithAttachments(turn.content, pendingAttachments)
-            : turn.content,
-      });
-    }
-
-    // Anthropic 要求 user/assistant 交替且首条为 user；合并连续同角色。
-    final normalized = _normalizeMessages(messages);
-
     final body = <String, Object?>{
       'model': model,
-      'messages': normalized,
+      'messages': messages,
       'max_tokens': (request.maxTokens != null && request.maxTokens! > 0)
           ? request.maxTokens
           : kDefaultAnthropicMaxTokens,
       'stream': true,
     };
-    if (systemParts.isNotEmpty) {
-      body['system'] = systemParts.join('\n\n');
+    final system = _systemText(request);
+    if (system.isNotEmpty) {
+      body['system'] = system;
     }
     // 思考开关与强度（官方 Messages API）：
     // - `thinking: {"type": "enabled"|"disabled"}`：省略时默认开启，关闭必须显式
@@ -181,9 +171,6 @@ class AnthropicClient extends HttpChatBackend {
         body['output_config'] = <String, Object?>{'effort': effort};
       }
     }
-    if (request.search) {
-      body['tools'] = deepSeekSearchTools();
-    }
     final stop = request.stop;
     if (stop != null && stop.isNotEmpty) {
       body['stop_sequences'] = stop;
@@ -193,6 +180,51 @@ class AnthropicClient extends HttpChatBackend {
       body['metadata'] = metadata;
     }
     return body;
+  }
+
+  /// 历史轮 + 附件 → Anthropic `messages`（已做过交替归一化）。
+  List<Map<String, Object?>> _buildMessages(ChatRequest request) {
+    final messages = <Map<String, Object?>>[];
+    final pendingAttachments = <Attachment>[
+      for (final attachment in request.attachments)
+        if ((attachment.fileId ?? '').trim().isNotEmpty) attachment,
+    ];
+
+    // 附件只挂到最后一条 user 消息上（挂到 assistant 会被 400）。
+    var lastUserIndex = -1;
+    for (var i = 0; i < request.messages.length; i++) {
+      if (request.messages[i].isUser) lastUserIndex = i;
+    }
+
+    for (var i = 0; i < request.messages.length; i++) {
+      final turn = request.messages[i];
+      // system 轮统一进顶层 `system`（见 [_systemText]）。
+      if (turn.isSystem) continue;
+      if (turn.content.trim().isEmpty) continue;
+      final attachHere = i == lastUserIndex && pendingAttachments.isNotEmpty;
+      messages.add(<String, Object?>{
+        'role': turn.isAssistant ? 'assistant' : 'user',
+        'content': attachHere
+            ? _userContentWithAttachments(turn.content, pendingAttachments)
+            : turn.content,
+      });
+    }
+
+    // Anthropic 要求 user/assistant 交替且首条为 user；合并连续同角色。
+    return _normalizeMessages(messages);
+  }
+
+  /// 顶层 `system`：请求级 system prompt + 历史里的 system 轮（按出现顺序）。
+  String _systemText(ChatRequest request) {
+    final parts = <String>[];
+    final system = request.effectiveSystemPrompt;
+    if (system.isNotEmpty) parts.add(system);
+    for (final turn in request.messages) {
+      if (!turn.isSystem) continue;
+      final content = turn.content.trim();
+      if (content.isNotEmpty) parts.add(content);
+    }
+    return parts.join('\n\n');
   }
 
   /// 请求头。
@@ -234,12 +266,550 @@ class AnthropicClient extends HttpChatBackend {
     final client = openClient();
     late final StreamController<ChatEvent> controller;
     controller = StreamController<ChatEvent>(
-      onListen: () => unawaited(_pump(request, controller, client)),
+      onListen: () => unawaited(
+        _usesClientSearch(request)
+            ? _pumpClientTools(request, controller, client)
+            : _pump(request, controller, client),
+      ),
       // 同步 abort：cancel() 里没有 await，返回的 future 已立即完成。
       onCancel: () => unawaited(cancel()),
     );
     return controller.stream;
   }
+
+  // -------------------------------------------------------------------
+  // 客户端联网工具（DeepSeek Search / Fetch API）
+  // -------------------------------------------------------------------
+
+  /// 客户端 function 工具名（普通 Anthropic 工具，不触发扩展模式）。
+  static const String _kClientToolSearch = 'web_search';
+  static const String _kClientToolReadUrl = 'read_url';
+
+  /// 最多几轮「模型要工具 → App 执行 → 结果回填」。最后一轮不带 tools。
+  static const int _kMaxToolRounds = 4;
+
+  /// 回填给模型的单个页面正文上限（字符）。
+  static const int _kToolResultMaxChars = 12000;
+
+  /// 是否走**客户端**联网工具。
+  ///
+  /// 条件：开了联网 + 配置为外部服务 + 外部服务真的可用（地址与 Key 都有）。
+  /// 外部服务没配好时退回服务端免费工具，而不是直接报错（老行为）。
+  bool _usesClientSearch(ChatRequest request) {
+    if (!request.search) return false;
+    final config = request.webSearch;
+    if (config == null || !config.isExternal) return false;
+    final base = config.effectiveBaseUrl;
+    final key = config.effectiveApiKey(apiKey);
+    return base.isNotEmpty && key.isNotEmpty;
+  }
+
+  /// 联网改为**客户端 function 工具**：模型自己决定搜什么，App 调外部
+  /// Search / Fetch API（[_kMaxToolRounds] 轮以内）。
+  ///
+  /// 为什么不用服务端工具：一旦声明 `deepseek_web_search` / `deepseek_read_url`，
+  /// 请求就进入 DeepSeek 的扩展模式，**当前这一轮最后一条 user 消息被限制在
+  /// 32768 tokens**（2026-11-25 实测：385K tokens 的 PDF 直接 400）。
+  Future<void> _pumpClientTools(
+    ChatRequest request,
+    StreamController<ChatEvent> controller,
+    http.Client client,
+  ) async {
+    final config = request.webSearch ??
+        const WebSearchConfig(mode: WebSearchMode.external);
+    final injected = _injectedSearch;
+    final search = injected ??
+        webSearchServiceFor(config, fallbackApiKey: apiKey);
+    if (search == null) {
+      // 理论到不了（_usesClientSearch 已校验）；兜底按服务端工具走。
+      await _pump(request, controller, client);
+      return;
+    }
+    try {
+      final messages = _buildMessages(request);
+      for (var round = 0; round < _kMaxToolRounds; round++) {
+        if (isCancelled || controller.isClosed) return;
+        // 最后一轮不再给工具：强制模型基于已有结果作答，避免轮数用尽没正文。
+        final allowTools = round < _kMaxToolRounds - 1;
+        final result = await _sendRound(
+          request,
+          client,
+          messages,
+          controller,
+          allowTools: allowTools,
+          withReadUrl: search.supportsFetch,
+        );
+        if (isCancelled || controller.isClosed) return;
+        if (!result.wantsTools) {
+          controller.add(Done(finishReason: result.finishReason));
+          return;
+        }
+        // assistant 侧：正文（若有）+ 每个工具调用的 `tool_use` block。
+        messages.add(<String, Object?>{
+          'role': 'assistant',
+          'content': <Map<String, Object?>>[
+            if (result.text.trim().isNotEmpty)
+              <String, Object?>{'type': 'text', 'text': result.text},
+            for (final call in result.toolCalls)
+              <String, Object?>{
+                'type': 'tool_use',
+                'id': call.id,
+                'name': call.name,
+                'input': call.input,
+              },
+          ],
+        });
+        // user 侧：每个 `tool_use` 都要有对应的 `tool_result`（缺一个会 400）。
+        final toolResults = <Map<String, Object?>>[];
+        for (final call in result.toolCalls) {
+          final content = await _executeToolCall(
+            call,
+            search,
+            controller,
+            count: config.count,
+          );
+          if (isCancelled || controller.isClosed) return;
+          toolResults.add(<String, Object?>{
+            'type': 'tool_result',
+            'tool_use_id': call.id,
+            'content': content,
+          });
+        }
+        messages.add(<String, Object?>{
+          'role': 'user',
+          'content': toolResults,
+        });
+      }
+      // 轮数用尽：把最后一轮的回答当作结束，避免死循环。
+      if (!controller.isClosed) {
+        controller.add(Done(finishReason: 'max_tool_rounds'));
+      }
+    } on ApiError catch (error, stackTrace) {
+      _report(controller, error, stackTrace);
+    } on SseInterruptedException catch (error, stackTrace) {
+      _report(controller, HttpChatBackend.interruptedError(error), stackTrace);
+    } on TimeoutException catch (error, stackTrace) {
+      _report(controller, ApiError.timeout(error), stackTrace);
+    } on http.ClientException catch (error, stackTrace) {
+      _report(controller, ApiError.network(error), stackTrace);
+    } catch (error, stackTrace) {
+      _report(controller, ApiError.network(error), stackTrace);
+    } finally {
+      // 测试注入的 service 由调用方负责释放（与 OpenAiClient 一致）。
+      if (injected == null) search.dispose();
+      releaseClient(client);
+      if (!controller.isClosed) unawaited(controller.close());
+    }
+  }
+
+  /// 发送一轮 `POST /messages` 并解析结果。
+  Future<_RoundResult> _sendRound(
+    ChatRequest request,
+    http.Client client,
+    List<Map<String, Object?>> messages,
+    StreamController<ChatEvent> controller, {
+    bool allowTools = true,
+    bool withReadUrl = true,
+  }) async {
+    final body = _baseBody(request, messages);
+    // 最后一轮不带工具：让模型必须给正文，而不是继续无限搜索。
+    if (allowTools) {
+      body['tools'] = _clientTools(withReadUrl: withReadUrl);
+    }
+    final hasFileRefs = request.attachments
+        .any((attachment) => (attachment.fileId ?? '').trim().isNotEmpty);
+    final httpRequest = http.Request('POST', _parseChatUri())
+      ..headers.addAll(_requestHeaders(withFiles: hasFileRefs))
+      ..body = jsonEncode(body);
+    final response = await sendStreamed(
+      client,
+      httpRequest,
+      timeout: request.timeout,
+    );
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      final errorBody = await response.stream.bytesToString();
+      throw apiErrorFromStatus(response.statusCode, errorBody);
+    }
+    if (isCancelled || controller.isClosed) {
+      return const _RoundResult(
+        text: '',
+        toolCalls: <_ToolCall>[],
+      );
+    }
+    final contentType = response.headers['content-type'];
+    if (!HttpChatBackend.isEventStreamContentType(contentType)) {
+      final text = await response.stream.bytesToString();
+      return _roundFromNonStream(text, controller);
+    }
+    return _roundFromSse(response.stream, controller);
+  }
+
+  /// 解析一轮 Anthropic SSE：累积正文 / 思考 / `tool_use` 的 `input_json_delta`，
+  /// 并实时把增量发给 UI。
+  Future<_RoundResult> _roundFromSse(
+    Stream<List<int>> stream,
+    StreamController<ChatEvent> controller,
+  ) async {
+    final text = StringBuffer();
+    final calls = <int, _ToolCall>{};
+    String? finishReason;
+    var sawAny = false;
+
+    await for (final event in parseSse(
+      stream,
+      isTerminator: isAnthropicTerminator,
+      interruptedMessage: sseInterruptedEventMessage,
+    )) {
+      if (isCancelled || controller.isClosed) break;
+      if (event.isDone) break;
+      final json = event.json;
+      final type = event.event ?? json?['type']?.toString();
+      if (type == null) {
+        // 无 event 名、无顶层 type、只带 `error` 的帧（等待生成超时等）。
+        final errorNode = json?['error'];
+        if (errorNode != null) {
+          throw ApiError(
+            extractApiErrorDetail(jsonEncode(<String, Object?>{
+                  'error': errorNode,
+                })) ??
+                errorNode.toString(),
+            kind: ApiErrorKind.http,
+          );
+        }
+        continue;
+      }
+      sawAny = true;
+      switch (type) {
+        case 'message_start':
+          final usage = parseUsage(json);
+          if (usage != null && usage.isNotEmpty && !controller.isClosed) {
+            controller.add(Usage(usage));
+          }
+        case 'content_block_start':
+          final index = _intOf(json?['index']);
+          final blockNode = json?['content_block'];
+          if (blockNode is Map) {
+            final block = Map<String, Object?>.from(blockNode);
+            switch ((block['type'] ?? '').toString()) {
+              case 'text':
+                final initial = block['text'];
+                if (initial is String && initial.isNotEmpty) {
+                  text.write(initial);
+                  if (!controller.isClosed) controller.add(TextDelta(initial));
+                }
+              case 'thinking':
+                final initial = block['thinking'];
+                if (initial is String && initial.isNotEmpty) {
+                  if (!controller.isClosed) {
+                    controller.add(ThinkingDelta(initial));
+                  }
+                }
+              case 'tool_use':
+                final call = calls.putIfAbsent(index, _ToolCall.new);
+                final id = block['id'];
+                if (id is String && id.trim().isNotEmpty) call.id = id.trim();
+                final name = block['name'];
+                if (name is String && name.trim().isNotEmpty) {
+                  call.name = name.trim();
+                }
+                // 兼容非流式风格的完整 input（正常流式为 `{}` + input_json_delta）。
+                final input = block['input'];
+                if (input is Map && input.isNotEmpty) {
+                  call.input = Map<String, Object?>.from(input);
+                }
+              default:
+                break;
+            }
+          }
+        case 'content_block_delta':
+          final index = _intOf(json?['index']);
+          final deltaNode = json?['delta'];
+          if (deltaNode is Map) {
+            final delta = Map<String, Object?>.from(deltaNode);
+            switch ((delta['type'] ?? '').toString()) {
+              case 'text_delta':
+                final piece = delta['text'];
+                if (piece is String && piece.isNotEmpty) {
+                  text.write(piece);
+                  if (!controller.isClosed) controller.add(TextDelta(piece));
+                }
+              case 'thinking_delta':
+                final piece = delta['thinking'];
+                if (piece is String && piece.isNotEmpty) {
+                  if (!controller.isClosed) {
+                    controller.add(ThinkingDelta(piece));
+                  }
+                }
+              case 'input_json_delta':
+                final partial = delta['partial_json'];
+                if (partial is String && partial.isNotEmpty) {
+                  calls
+                      .putIfAbsent(index, _ToolCall.new)
+                      .arguments
+                      .write(partial);
+                }
+              default:
+                break;
+            }
+          }
+        case 'content_block_stop':
+          // 参数在 input_json_delta 里已累积完，执行工具时再解码。
+          break;
+        case 'message_delta':
+          final usage = parseUsage(json);
+          if (usage != null && usage.isNotEmpty && !controller.isClosed) {
+            controller.add(Usage(usage));
+          }
+          final deltaNode = json?['delta'];
+          if (deltaNode is Map) {
+            final reason = deltaNode['stop_reason'];
+            if (reason != null) finishReason = reason.toString();
+          }
+        case 'message_stop':
+          // 结束标记：parseSse 已按该事件名终止，这里跳出 switch 等流结束。
+          break;
+        case 'error':
+          final detail = extractApiErrorDetail(jsonEncode(<String, Object?>{
+                'error': json?['error'],
+              })) ??
+              'unknown';
+          throw ApiError(detail, kind: ApiErrorKind.http);
+        case 'ping':
+          break;
+        default:
+          break;
+      }
+    }
+    if (!sawAny) {
+      throw ApiError(kUnparsableNonStreamMessage, kind: ApiErrorKind.parse);
+    }
+    return _RoundResult(
+      text: text.toString(),
+      toolCalls: _orderedCalls(calls),
+      finishReason: finishReason,
+    );
+  }
+
+  /// 非流式回退（`{"content":[...],"usage":{...},"stop_reason":...}`）。
+  _RoundResult _roundFromNonStream(
+    String body,
+    StreamController<ChatEvent> controller,
+  ) {
+    final json = HttpChatBackend.decodeJsonObject(body);
+    final errorNode = json['error'];
+    if (errorNode != null) {
+      throw ApiError(
+        extractApiErrorDetail(jsonEncode(<String, Object?>{'error': errorNode})) ??
+            errorNode.toString(),
+        kind: ApiErrorKind.http,
+      );
+    }
+    final text = StringBuffer();
+    final calls = <_ToolCall>[];
+    final content = json['content'];
+    if (content is List) {
+      for (final node in content) {
+        if (node is! Map) continue;
+        final block = Map<String, Object?>.from(node);
+        switch ((block['type'] ?? 'text').toString()) {
+          case 'text':
+            final piece = block['text'];
+            if (piece is String && piece.isNotEmpty) {
+              text.write(piece);
+              if (!controller.isClosed) controller.add(TextDelta(piece));
+            }
+          case 'thinking':
+            final piece = block['thinking'];
+            if (piece is String && piece.isNotEmpty) {
+              if (!controller.isClosed) {
+                controller.add(ThinkingDelta(piece));
+              }
+            }
+          case 'tool_use':
+            final call = _ToolCall();
+            final id = block['id'];
+            if (id is String) call.id = id.trim();
+            final name = block['name'];
+            if (name is String) call.name = name.trim();
+            final input = block['input'];
+            if (input is Map) call.input = Map<String, Object?>.from(input);
+            calls.add(call);
+          default:
+            break;
+        }
+      }
+    }
+    for (var i = 0; i < calls.length; i++) {
+      if (calls[i].id.isEmpty) calls[i].id = 'toolu_${i + 1}';
+      if (calls[i].name.isEmpty) calls[i].name = _kClientToolSearch;
+    }
+    final usage = parseUsage(json);
+    if (usage != null && usage.isNotEmpty && !controller.isClosed) {
+      controller.add(Usage(usage));
+    }
+    return _RoundResult(
+      text: text.toString(),
+      toolCalls: calls,
+      finishReason: json['stop_reason']?.toString(),
+    );
+  }
+
+  /// 按 block index 排序，并补齐缺失的 id / name / 参数。
+  static List<_ToolCall> _orderedCalls(Map<int, _ToolCall> calls) {
+    final indexes = calls.keys.toList()..sort();
+    final ordered = <_ToolCall>[];
+    for (var i = 0; i < indexes.length; i++) {
+      final call = calls[indexes[i]]!;
+      if (call.id.isEmpty) call.id = 'toolu_${i + 1}';
+      if (call.name.isEmpty) call.name = _kClientToolSearch;
+      if (call.arguments.isNotEmpty) {
+        final decoded = _toolArguments(call.arguments.toString());
+        if (decoded.isNotEmpty) call.input = decoded;
+      }
+      ordered.add(call);
+    }
+    return ordered;
+  }
+
+  /// 执行一个工具调用并把结果回填给模型（失败也回填，让模型自己兜底）。
+  Future<String> _executeToolCall(
+    _ToolCall call,
+    WebSearchService search,
+    StreamController<ChatEvent> controller, {
+    int count = 8,
+  }) async {
+    final args = call.input;
+    if (call.name == _kClientToolSearch) {
+      final query = (args['query'] ?? '').toString().trim();
+      if (query.isEmpty) return '缺少 query 参数，请重新调用。';
+      if (!controller.isClosed) {
+        controller.add(
+          ToolResult(tool: kToolWebSearch, running: true, query: query),
+        );
+      }
+      try {
+        final items = await search.search(query, count: count);
+        if (!controller.isClosed) {
+          controller.add(ToolResult(
+            tool: kToolWebSearch,
+            running: false,
+            query: query,
+            sources: <SearchSource>[
+              for (final item in items)
+                SearchSource(
+                  url: item.url,
+                  title: item.title,
+                  snippet: item.snippet ?? item.summary,
+                  siteName: item.siteName,
+                  publishedAt: item.publishedAt,
+                ),
+            ],
+          ));
+        }
+        if (items.isEmpty) return '没有搜到结果，可以换个关键词，或直接回答。';
+        return items
+            .asMap()
+            .entries
+            .map((entry) => entry.value.toModelText(
+                  index: entry.key + 1,
+                  maxContentChars: 2000,
+                ))
+            .join('\n\n');
+      } catch (error) {
+        if (!controller.isClosed) {
+          controller.add(
+            ToolResult(tool: kToolWebSearch, running: false, query: query),
+          );
+        }
+        return '联网搜索失败：${error is ApiError ? error.message : error}';
+      }
+    }
+    if (call.name == _kClientToolReadUrl) {
+      final url = (args['url'] ?? '').toString().trim();
+      if (url.isEmpty) return '缺少 url 参数，请重新调用。';
+      if (!controller.isClosed) {
+        controller.add(ToolResult(tool: kToolReadUrl, running: true, query: url));
+      }
+      try {
+        final page = await search.fetchPage(url);
+        if (!controller.isClosed) {
+          controller.add(ToolResult(
+            tool: kToolReadUrl,
+            running: false,
+            query: url,
+            sources: <SearchSource>[
+              SearchSource(url: url, title: page.title),
+            ],
+          ));
+        }
+        return '${page.title ?? url}\n$url\n\n'
+            '${_clip(page.content, _kToolResultMaxChars)}';
+      } catch (error) {
+        if (!controller.isClosed) {
+          controller.add(
+            ToolResult(tool: kToolReadUrl, running: false, query: url),
+          );
+        }
+        return '读取链接失败：${error is ApiError ? error.message : error}';
+      }
+    }
+    return '未知工具：${call.name}';
+  }
+
+  /// 客户端 function 工具声明（Anthropic 普通工具形状：name + input_schema，
+  /// 没有 `type` 字段，不会进入 DeepSeek 的扩展模式）。
+  ///
+  /// [withReadUrl] 为 false 时（博查 / Brave 只有搜索）不声明 `read_url`。
+  static List<Map<String, Object?>> _clientTools({
+    required bool withReadUrl,
+  }) =>
+      <Map<String, Object?>>[
+        <String, Object?>{
+          'name': _kClientToolSearch,
+          'description': '联网搜索网页。需要最新信息、外部资料或核实事实时调用；'
+              'query 用关键词，不要写成整段问题。',
+          'input_schema': <String, Object?>{
+            'type': 'object',
+            'properties': <String, Object?>{
+              'query': <String, Object?>{
+                'type': 'string',
+                'description': '搜索关键词',
+              },
+            },
+            'required': <String>['query'],
+          },
+        },
+        if (withReadUrl)
+          <String, Object?>{
+            'name': _kClientToolReadUrl,
+            'description': '读取一个网页的正文（Markdown）。需要看某个链接的具体内容时调用。',
+            'input_schema': <String, Object?>{
+              'type': 'object',
+              'properties': <String, Object?>{
+                'url': <String, Object?>{
+                  'type': 'string',
+                  'description': '要读取的 http(s) 链接',
+                },
+              },
+              'required': <String>['url'],
+            },
+          },
+      ];
+
+  static Map<String, Object?> _toolArguments(String raw) {
+    final text = raw.trim();
+    if (text.isEmpty) return const <String, Object?>{};
+    try {
+      final decoded = jsonDecode(text);
+      if (decoded is Map) return Map<String, Object?>.from(decoded);
+    } catch (_) {
+      // 模型偶尔给非法 JSON：按空参数处理，让模型重试。
+    }
+    return const <String, Object?>{};
+  }
+
+  static String _clip(String text, int maxChars) =>
+      text.length <= maxChars ? text : '${text.substring(0, maxChars)}…';
 
   Future<void> _pump(
     ChatRequest request,
@@ -738,4 +1308,35 @@ int _intOf(Object? value) {
   if (value is num) return value.round();
   if (value is String) return int.tryParse(value.trim()) ?? 0;
   return 0;
+}
+
+/// 流式累积中的一个 Anthropic `tool_use` block。
+final class _ToolCall {
+  String id = '';
+  String name = '';
+
+  /// `input_json_delta.partial_json` 拼起来的原始参数 JSON。
+  final StringBuffer arguments = StringBuffer();
+
+  /// 解析后的参数（block 起始就带完整 `input` 时直接用）。
+  Map<String, Object?> input = const <String, Object?>{};
+}
+
+/// 一轮响应的解析结果（正文 / 工具调用 / 结束原因）。
+final class _RoundResult {
+  const _RoundResult({
+    required this.text,
+    required this.toolCalls,
+    this.finishReason,
+  });
+
+  final String text;
+  final List<_ToolCall> toolCalls;
+  final String? finishReason;
+
+  /// 模型是否要求执行客户端工具。
+  ///
+  /// Anthropic 正常会给 `stop_reason: "tool_use"`；兼容端点偶尔省略
+  /// `message_delta`，所以只要解析到 `tool_use` block 就当作要执行。
+  bool get wantsTools => toolCalls.isNotEmpty;
 }
