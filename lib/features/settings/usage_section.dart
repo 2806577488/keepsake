@@ -55,11 +55,38 @@ class PerSessionUsageTile extends ConsumerWidget {
 }
 
 /// 「账户余额」行：DeepSeek 官方余额（剩余 / 已用 / 剩余率）。
-class BalanceTile extends ConsumerWidget {
+///
+/// v0.4.38：进入设置页时，快照超过 [BalanceSnapshot.staleAfter]（或从未查过）就自动刷新一次。
+/// 以前只在明细页首次打开且无快照时才请求，用户看到的余额可能一直是旧值。
+class BalanceTile extends ConsumerStatefulWidget {
   const BalanceTile({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<BalanceTile> createState() => _BalanceTileState();
+}
+
+class _BalanceTileState extends ConsumerState<BalanceTile> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(_refreshIfStale());
+    });
+  }
+
+  Future<void> _refreshIfStale() async {
+    if (!mounted) return;
+    final snapshot = ref.read(balanceProvider).value;
+    if (snapshot != null && !snapshot.isStale()) return;
+    try {
+      await ref.read(balanceProvider.notifier).refresh();
+    } catch (_) {
+      // 设置页静默：余额拉不到不该弹错误（明细页里再给原因）。
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final provider = ref.watch(providerBookProvider).current;
     final snapshot = ref.watch(balanceProvider).value;
     return ListTile(

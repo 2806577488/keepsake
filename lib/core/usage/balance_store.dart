@@ -88,6 +88,16 @@ class BalanceSnapshot {
   /// 有数据（成功查询过）。
   bool get hasData => updatedAt != null;
 
+  /// 超过这个时长就认为余额过期，进页面时自动刷新一次（防抖，避免反复请求）。
+  static const Duration staleAfter = Duration(seconds: 60);
+
+  /// 是否过期（没数据也算过期）。
+  bool isStale([DateTime? now]) {
+    final at = updatedAt;
+    if (at == null) return true;
+    return (now ?? DateTime.now()).difference(at) > staleAfter;
+  }
+
   /// 应用一次接口结果，返回新快照。
   ///
   /// 充值判定与基线累加规则见文件头注释；币种变化时重置基线（避免混币种计算）。
