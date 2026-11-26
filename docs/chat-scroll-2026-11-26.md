@@ -90,3 +90,13 @@ if (atBottom) { if (!_autoFollow.value) _autoFollow.value = true; }
 - **流结束瞬间**：纯文本 → `KeepsakeMarkdown` 一次性排版 + 气泡 `minWidth` 由
   `bubbleMax` 收回内容宽度，气泡高度会变一次。这是「结束时跳一下」的来源，
   与跟随无关；如果用户仍报这个，再单独处理（例如结束后保持流式宽度 300ms）。
+
+## 追加（2026-11-26 晚）：按钮版式
+
+「回到底部」不再单独占一行。原实现放在列表与芯片之间，虽然不压字，但会空出一条横带、
+还挤掉消息区一截高度（用户实测原话"整一行也盖我文字"）。现在挪进 `_ComposerTools`
+所在 `Row` 的最右端，和三个工具芯片**同一行**、右对齐，只在离开底部时出现。
+
+设计库已同步（v3.8）：`SPEC.md` §4.10 改按钮位置并补「拖拽期间不许改 offset」硬规则；
+`docs/CHECKLIST.md` §27 加两条验收；`reference/full-chat.html` 的 `chips()` 支持
+`goBottom`、`full.css` 的 `.gobottom` 去掉 `position:absolute`。
