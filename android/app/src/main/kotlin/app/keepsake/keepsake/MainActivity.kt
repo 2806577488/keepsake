@@ -2,19 +2,25 @@ package app.keepsake.keepsake
 
 import android.app.Activity
 import android.content.ActivityNotFoundException
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.MediaStore
 import android.provider.OpenableColumns
 import android.provider.Settings
+import android.widget.Toast
 import androidx.core.content.FileProvider
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
+import java.io.ByteArrayOutputStream
 import java.io.File
 
 /**
@@ -72,6 +78,9 @@ class MainActivity : FlutterActivity() {
 
     /** 同一毫秒内多选多张时的序号，避免「时间戳前缀」自己撞车。 */
     private var pickedSeq = 0
+
+    /** 「用其他应用打开」文本文件时最多读多少字节（防止误开超大日志吃满内存）。 */
+    private val maxIncomingTextBytes = 2 * 1024 * 1024
 
     /**
      * 图库选图返回。
@@ -132,6 +141,72 @@ class MainActivity : FlutterActivity() {
         mainHandler.post {
             pending.success(MediaLibrary.access(this) != MediaAccess.NONE)
         }
+    }
+
+    /** 冷启动就带着文件来（「用其他应用打开」→ Keepsake）。 */
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        readIncomingText(intent)?.let { deliverIncomingText(it) }
+    }
+
+    /** 已在前台时又被「用其他应用打开」一次（launchMode 是 singleTop）。 */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        readIncomingText(intent)?.let { deliverIncomingText(it) }
+    }
+
+    /**
+     * 读「用其他应用打开」的文本文件内容。
+     *
+     * 只认 text 开头的 MIME；超过 [maxIncomingTextBytes] 截断。读不到就返回 null（不弹错误）。
+     */
+    private fun readIncomingText(intent: Intent?): String? {
+        if (intent == null || intent.action != Intent.ACTION_VIEW) return null
+        val uri = intent.data ?: return null
+        val type = intent.type
+            ?: try {
+                contentResolver.getType(uri)
+            } catch (error: Exception) {
+                null
+            }
+            ?: ""
+        if (!type.startsWith("text/")) return null
+        return try {
+            contentResolver.openInputStream(uri)?.use { input ->
+                val out = ByteArrayOutputStream()
+                val buffer = ByteArray(8192)
+                var total = 0
+                while (total < maxIncomingTextBytes) {
+                    val read = input.read(buffer)
+                    if (read <= 0) break
+                    val allowed = minOf(read, maxIncomingTextBytes - total)
+                    if (allowed <= 0) break
+                    out.write(buffer, 0, allowed)
+                    total += allowed
+                }
+                String(out.toByteArray(), Charsets.UTF_8)
+            }
+        } catch (error: Exception) {
+            null
+        }
+    }
+
+    /** MVP：把文件内容复制到剪贴板并提示粘贴（暂时不自动建会话）。 */
+    private fun deliverIncomingText(text: String) {
+        val trimmed = text.trim()
+        if (trimmed.isEmpty()) return
+        try {
+            val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            clipboard.setPrimaryClip(ClipData.newPlainText("Keepsake", trimmed))
+        } catch (error: Exception) {
+            // 剪贴板不可用：下面的 Toast 仍会提示
+        }
+        Toast.makeText(
+            this,
+            "已读取文件内容（${trimmed.length} 字）并复制，粘贴到输入框即可",
+            Toast.LENGTH_LONG,
+        ).show()
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {

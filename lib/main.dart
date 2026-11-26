@@ -13,6 +13,7 @@ library;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -85,6 +86,10 @@ class KeepsakeApp extends ConsumerWidget {
     return MaterialApp(
       title: 'Keepsake（留声）',
       debugShowCheckedModeBanner: false,
+      // v0.4.42：应用内默认中文（选择菜单、日期控件等系统级文案都跟着变）。
+      locale: const Locale('zh', 'CN'),
+      supportedLocales: const <Locale>[Locale('zh', 'CN'), Locale('en')],
+      localizationsDelegates: GlobalMaterialLocalizations.delegates,
       theme: KeepsakeTheme.of(Brightness.light, skinId: settings.skinId),
       darkTheme: KeepsakeTheme.of(Brightness.dark, skinId: settings.skinId),
       themeMode: settings.themeMode,

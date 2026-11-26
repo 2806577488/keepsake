@@ -402,8 +402,12 @@ Future<String> uploadAttachment(
     );
     return uploaded.id;
   } on ApiError catch (error) {
+    // 不重复叠前缀（错误在上层可能已经带过一次）。
+    final message = error.message.startsWith(kAttachmentUploadFailedPrefix)
+        ? error.message
+        : '$kAttachmentUploadFailedPrefix${error.message}';
     throw ApiError(
-      '$kAttachmentUploadFailedPrefix${error.message}',
+      message,
       statusCode: error.statusCode,
       body: error.body,
       cause: error,

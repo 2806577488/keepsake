@@ -39,6 +39,7 @@ import '../../core/skin_tokens.dart' show kChipFontSize, kChipIconSize;
 import '../../core/theme.dart'
     show KeepsakeSkinColors, KeepsakeTheme;
 import '../../core/ui/toast.dart' show showTopToast;
+import '../../core/ui/selection_menu.dart' show keepsakeContextMenu;
 import '../../core/voice/voice_error.dart'
     show VoiceError, VoiceText, voiceErrorMessage;
 import '../../core/voice/voice_guards.dart';
@@ -1829,6 +1830,7 @@ class _MessageBubble extends StatelessWidget {
                         ),
                         child: SelectableText(
                           message.plainText,
+                          contextMenuBuilder: keepsakeContextMenu,
                           style: theme.textTheme.bodyLarge?.copyWith(
                             fontSize: skin.fsBody,
                             height: skin.lineHeight,
@@ -2058,6 +2060,7 @@ class _AssistantBodyState extends State<_AssistantBody> {
         padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
         child: SelectableText(
           text,
+          contextMenuBuilder: keepsakeContextMenu,
           style: theme.textTheme.bodyLarge?.copyWith(
             fontSize: skin.fsBody,
             height: skin.lineHeight,
@@ -2075,6 +2078,7 @@ class _AssistantBodyState extends State<_AssistantBody> {
           children: <Widget>[
             SelectableText(
               text,
+              contextMenuBuilder: keepsakeContextMenu,
               style: theme.textTheme.bodyLarge?.copyWith(
                 fontSize: skin.fsBody,
                 height: skin.lineHeight,
@@ -3144,15 +3148,108 @@ class _PendingChips extends StatelessWidget {
             runSpacing: 6,
             children: <Widget>[
               for (final attachment in attachments)
-                _AttachmentView(
-                  attachment: attachment,
-                  size: 52,
-                  onRemove: () => onRemove(attachment.id),
-                  showName: false,
+                GestureDetector(
+                  // 图片附件：点缩略图 → 全屏预览（可关闭 / 删除）。
+                  onTap: attachment.isImage
+                      ? () => _openAttachmentPreview(context, attachment, onRemove)
+                      : null,
+                  child: _AttachmentView(
+                    attachment: attachment,
+                    size: 52,
+                    onRemove: () => onRemove(attachment.id),
+                    showName: false,
+                  ),
                 ),
             ],
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// 打开附件全屏预览（目前只对图片）。
+Future<void> _openAttachmentPreview(
+  BuildContext context,
+  ChatAttachmentView attachment,
+  void Function(String id) onRemove,
+) {
+  return Navigator.of(context).push(
+    MaterialPageRoute<void>(
+      fullscreenDialog: true,
+      builder: (_) => _AttachmentPreviewScreen(
+        attachment: attachment,
+        onDelete: () => onRemove(attachment.id),
+      ),
+    ),
+  );
+}
+
+/// 附件全屏预览：黑底、可双指缩放，左上关闭、右上删除。
+class _AttachmentPreviewScreen extends StatelessWidget {
+  const _AttachmentPreviewScreen({
+    required this.attachment,
+    required this.onDelete,
+  });
+
+  final ChatAttachmentView attachment;
+  final VoidCallback onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: SafeArea(
+        child: Stack(
+          children: <Widget>[
+            Positioned.fill(
+              child: InteractiveViewer(
+                minScale: 0.8,
+                maxScale: 6,
+                child: Center(
+                  child: Image.file(
+                    File(attachment.path),
+                    fit: BoxFit.contain,
+                    errorBuilder:
+                        (
+                          BuildContext context,
+                          Object error,
+                          StackTrace? stack,
+                        ) {
+                          return const Center(
+                            child: Text(
+                              '图片读不出来了',
+                              style: TextStyle(color: Colors.white70),
+                            ),
+                          );
+                        },
+                  ),
+                ),
+              ),
+            ),
+            Positioned(
+              top: 4,
+              left: 4,
+              child: IconButton(
+                tooltip: '关闭',
+                onPressed: () => Navigator.of(context).pop(),
+                icon: const Icon(Icons.close, color: Colors.white),
+              ),
+            ),
+            Positioned(
+              top: 4,
+              right: 4,
+              child: IconButton(
+                tooltip: '删除',
+                onPressed: () {
+                  onDelete();
+                  Navigator.of(context).pop();
+                },
+                icon: const Icon(Icons.delete_outline, color: Colors.white),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -3320,6 +3417,7 @@ class _InputBarState extends State<_InputBar> {
                   : TextField(
                       controller: widget.controller,
                       focusNode: widget.focusNode,
+                      contextMenuBuilder: keepsakeContextMenu,
                       minLines: 1,
                       maxLines: widget.compact ? 3 : 6,
                       textInputAction: TextInputAction.newline,
@@ -3337,14 +3435,33 @@ class _InputBarState extends State<_InputBar> {
                       // 只禁「发送」，不禁「输入」。
                       // 占位符用 hintText：Flutter 只在文本为空时显示，
                       // 聚焦时仍可见，输入第一个字符才消失（v3.2 §2.1）。
-                      decoration: const InputDecoration(
+                      // v0.4.42：装饰自包含，不再复用主题的 OutlineInputBorder
+                      // （多行时边框高度与文本区对不上，文字会顶出边框）。
+                      decoration: InputDecoration(
                         hintText: '发消息…',
-                        contentPadding: EdgeInsets.symmetric(
+                        filled: true,
+                        fillColor: skin.c.highest,
+                        isDense: true,
+                        contentPadding: const EdgeInsets.symmetric(
                           horizontal: 16,
                           vertical: 12,
                         ),
-                        constraints: BoxConstraints(
-                          minHeight: KeepsakeTheme.inputHeight,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(16),
+                          borderSide: BorderSide.none,
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(16),
+                          borderSide: BorderSide(
+                            color: scheme.outlineVariant.withValues(alpha: 0.6),
+                          ),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(16),
+                          borderSide: BorderSide(
+                            width: 1.5,
+                            color: scheme.onSurface,
+                          ),
                         ),
                       ),
                     ),

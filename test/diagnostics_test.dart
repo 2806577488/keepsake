@@ -20,7 +20,9 @@ void main() {
 
     expect(text.contains('Keepsake 诊断信息'), true);
     expect(text.contains('设置（脱敏，不含 Key）'), true);
-    expect(text.contains('平台：deepseek'), true);
+    // 没有传入平台时显示「未选中」（settings.providerId 不是真实选择，见 v0.4.42 修复）
+    expect(text.contains('平台：未选中'), true);
+    expect(text.contains('Key：—'), true);
     expect(text.contains('模型：deepseek-chat'), true);
     expect(text.contains('记忆/情绪/人格：开/关/开'), true);
     expect(text.contains('实体字段抽取：关'), true);

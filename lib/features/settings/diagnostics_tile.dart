@@ -34,6 +34,7 @@ class _DiagnosticsTileState extends ConsumerState<DiagnosticsTile> {
       final file = await exportDiagnosticsFile(
         db: ref.read(databaseProvider),
         settings: ref.read(settingsProvider),
+        provider: ref.read(providerBookProvider).current,
       );
       if (!mounted) return;
       try {
