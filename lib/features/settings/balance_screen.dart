@@ -40,7 +40,10 @@ class _BalanceScreenState extends ConsumerState<BalanceScreen> {
   Future<void> _autoLoad() async {
     try {
       final store = await ref.read(balanceStoreProvider.future);
-      if (!mounted || store.snapshot != null) return;
+      if (!mounted) return;
+      final snapshot = store.snapshot;
+      // v0.4.38：进页面就刷新——只有 60 秒内的快照才算新鲜；以前是"有快照就不查"。
+      if (snapshot != null && !snapshot.isStale()) return;
       await _refresh();
     } catch (_) {
       // 存储读取失败：不自动请求，用户可手动刷新。
