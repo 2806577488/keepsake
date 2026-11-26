@@ -463,7 +463,7 @@ class _CharacterCardDialogState extends State<_CharacterCardDialog> {
               Padding(
                 padding: const EdgeInsets.only(top: 6),
                 child: Text(
-                  '只保存在这张卡上；当前版本不会替代「设置 › AI 平台」里的全局 system prompt。',
+                  '会追加在「设置 › AI 平台」的全局 system prompt 之后；留空则不注入。',
                   style: theme.textTheme.bodySmall?.copyWith(color: s.c.onV),
                 ),
               ),

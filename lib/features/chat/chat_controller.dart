@@ -1350,6 +1350,13 @@ class ChatController extends Notifier<ChatUiState> {
       // 角色卡：情绪 / 人格 / 记忆只读写当前会话绑定的角色（没有就按需建默认卡）。
       final character = await CharacterService(ref.read(databaseProvider))
           .ensureForSession(_sessionId);
+      // v0.4.34：角色卡的人设**真的**进 system prompt。
+      // 它是稳定内容（只在编辑角色卡时变），所以放 system 前缀，不破坏块前缀缓存；
+      // 每轮变化的情绪/召回仍然挂在最后一轮 user（见上面的缓存说明）。
+      final characterSection = characterPromptSection(character.prompt);
+      if (characterSection.isNotEmpty) {
+        systemContent = '$systemContent\n\n$characterSection';
+      }
       final injection = await ref
           .read(brainServiceProvider)
           .buildInjection(
