@@ -1052,6 +1052,20 @@ class _UpdateTileState extends State<_UpdateTile> {
     }
   }
 
+  /// 点「检查更新」：**已有缓存结果就直接弹确认框**，不重新查网络。
+  ///
+  /// v0.4.37：进设置页时已经静默查过一次（`_bootstrap`），以前点开还要再查一遍，
+  /// 用户看到的是「点一下 → 转几秒圈 → 才出更新界面」。现在直接用缓存：
+  /// 点开即弹对话框；只有缓存为空（首次进入、或上次静默检查失败）才去查。
+  Future<void> _onTapUpdate() async {
+    final cached = _pending;
+    if (cached != null) {
+      await _confirm(cached);
+      return;
+    }
+    await _check(silent: false);
+  }
+
   /// 失败对话框：文案 + 「在浏览器打开」（H3/H4 兜底）。
   ///
   /// [manualUrl] 为空时退回 [UpdateService.manualUrl]（Release 页）；
@@ -1451,7 +1465,7 @@ class _UpdateTileState extends State<_UpdateTile> {
               ),
             )
           : const Icon(Icons.chevron_right),
-      onTap: _checking ? null : () => _check(silent: false),
+      onTap: _checking ? null : _onTapUpdate,
     );
   }
 }
