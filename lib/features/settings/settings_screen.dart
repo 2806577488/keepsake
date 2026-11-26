@@ -43,6 +43,7 @@ import 'package:keepsake/core/theme.dart' show KeepsakeSkinColors, KeepsakeTheme
 import 'package:keepsake/core/update/update_service.dart';
 import 'package:keepsake/features/settings/export_tile.dart';
 import 'package:keepsake/features/sessions/delete_task.dart';
+import 'package:keepsake/features/settings/brain_layers_screen.dart';
 import 'package:keepsake/features/settings/data_maintenance_section.dart';
 import 'package:keepsake/features/settings/import_tile.dart';
 import 'package:keepsake/features/settings/characters_screen.dart';
@@ -596,6 +597,16 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 overflow: TextOverflow.ellipsis,
               ),
               onTap: _specialty,
+            ),
+            ListTile(
+              leading: const Icon(Icons.psychology_outlined),
+              title: const Text('大脑分层'),
+              subtitle: const Text('角色定义（我是谁）· 实体档案 · 版本历史'),
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => const BrainLayersScreen(),
+                ),
+              ),
             ),
             ListTile(
               leading: Icon(
