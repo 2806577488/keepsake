@@ -15,6 +15,7 @@ import 'package:drift/drift.dart' show OrderingTerm;
 import '../db/database.dart';
 import '../providers.dart' show databaseProvider;
 import 'brain_store.dart';
+import 'brain_entities_store.dart';
 import 'brain_types.dart';
 import 'fact_extractor.dart';
 import 'mood.dart';
@@ -44,6 +45,9 @@ class BrainService {
   final AppDatabase _db;
 
   BrainStore get _store => BrainStore(_db);
+
+  /// 实体层：对象档案 / 关联原文 / 表意识槽位（v0.4.35）。
+  BrainEntityStore get _entities => BrainEntityStore(_db);
 
   /// 每个角色上一轮注入的条目。
   final Map<String, _PendingInjection> _pending = <String, _PendingInjection>{};
@@ -332,6 +336,27 @@ class BrainService {
           await _store.mergeFacts('self', selfFacts, characterId: characterId);
         }
       } catch (_) {}
+
+      // 实体层（v0.4.35）：把本轮聊到的患者/客户/项目抽出来、关联原文。
+      // 挂在记忆开关下：实体是记忆的一种组织方式，关掉记忆就没有实体。
+      if (config.memoryEnabled && turnMessageIds.isNotEmpty) {
+        try {
+          await _entities.ingestMessages(
+            characterId: characterId,
+            sessionId: sessionId,
+            messages: <IngestMessage>[
+              IngestMessage(
+                messageId: turnMessageIds.first,
+                userText: userText,
+                assistantText: assistantText,
+                at: DateTime.now(),
+              ),
+            ],
+          );
+        } catch (_) {
+          // 实体抽取失败不影响整理
+        }
+      }
 
       // 情节：每 N 轮生成一条。
       final counter = (_turnCounters[characterId] ?? 0) + 1;

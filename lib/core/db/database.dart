@@ -228,6 +228,23 @@ class Characters extends Table {
   /// `manual` / `import` / `default`。
   TextColumn get source => text().withDefault(const Constant('manual'))();
 
+  // ---- v0.4.35：角色层（移植自 dsh-brain 的自我定义） ----
+  // 与 `prompt` 的区别：`prompt` 是**用户写的**人设；`definition` 是**模型从对话里
+  // 长出来的**自我定义（bootstrap + 每 N 轮修订，带版本历史）。
+  /// 自我定义正文（空串 = 还没 bootstrap）。
+  TextColumn get definition => text().withDefault(const Constant(''))();
+
+  /// 版本号（0 = 未 bootstrap；≥1 = 已写过几版）。
+  IntColumn get definitionVersion =>
+      integer().withDefault(const Constant(0))();
+
+  /// `llm`（模型写的）/ `fallback`（无模型时的规则兜底）/ `''`（还没有）。
+  TextColumn get definitionSource => text().withDefault(const Constant(''))();
+
+  /// 上次修订后攒了多少轮新证据（到阈值才再修订）。
+  IntColumn get definitionEvidence =>
+      integer().withDefault(const Constant(0))();
+
   DateTimeColumn get createdAt => dateTime().clientDefault(DateTime.now)();
 
   DateTimeColumn get updatedAt => dateTime().clientDefault(DateTime.now)();
@@ -419,6 +436,117 @@ class PersonaTraitRows extends Table {
 }
 
 // ---------------------------------------------------------------------------
+// v0.4.35：移植 dsh-brain 的角色版本 / 实体档案 / 表意识槽位（schemaVersion 6）
+//
+// 一律带 `characterId`：App 里「一张角色卡 = 一个记忆域」，实体和角色定义都不能
+// 跨卡串。表意识槽位还带 `sessionId`（同一张卡下不同会话的"眼下在说谁"互不干扰）。
+// ---------------------------------------------------------------------------
+
+/// 角色定义的版本历史（模型每修订一次落一版，可回溯）。
+@DataClassName('CharacterVersionRow')
+@TableIndex(name: 'character_versions_at', columns: {#characterId, #version})
+class CharacterVersions extends Table {
+  TextColumn get characterId => text()();
+
+  IntColumn get version => integer()();
+
+  TextColumn get definition => text().withDefault(const Constant(''))();
+
+  /// `bootstrap` / `revise` / `fallback`。
+  TextColumn get reason => text().withDefault(const Constant(''))();
+
+  DateTimeColumn get createdAt => dateTime().clientDefault(DateTime.now)();
+
+  @override
+  Set<Column<Object>> get primaryKey => <Column<Object>>{characterId, version};
+}
+
+/// 实体档案（患者 / 客户 / 项目 / 宠物）。
+@DataClassName('EntityRow')
+@TableIndex(name: 'entities_scope', columns: {#characterId, #name})
+@TableIndex(name: 'entities_updated', columns: {#characterId, #updatedAt})
+class Entities extends Table {
+  TextColumn get id => text()();
+
+  TextColumn get characterId => text().withDefault(const Constant(''))();
+
+  /// `patient` / `client` / `project` / `pet`。
+  TextColumn get kind => text().withDefault(const Constant('patient'))();
+
+  /// 归一化后的名字（`患者张三` → `张三`）。
+  TextColumn get name => text()();
+
+  /// 别名 JSON 数组（同一个人被叫过的其他名字）。
+  TextColumn get aliasesJson => text().withDefault(const Constant('[]'))();
+
+  DateTimeColumn get createdAt => dateTime().clientDefault(DateTime.now)();
+
+  DateTimeColumn get updatedAt => dateTime().clientDefault(DateTime.now)();
+
+  DateTimeColumn get lastSeenAt => dateTime().nullable()();
+
+  @override
+  Set<Column<Object>> get primaryKey => <Column<Object>>{id};
+}
+
+/// 挂在实体上的要点（`kind` 白名单见 brain_entities.dart：主诉/辨证/处方…）。
+@DataClassName('EntityFactRow')
+@TableIndex(name: 'entity_facts_scope', columns: {#entityId, #createdAt})
+class EntityFacts extends Table {
+  TextColumn get id => text()();
+
+  TextColumn get characterId => text().withDefault(const Constant(''))();
+
+  TextColumn get entityId => text()();
+
+  TextColumn get kind => text().withDefault(const Constant('备注'))();
+
+  /// `≤120 字`（列名带前缀，避免和 drift 的 `text()` 撞名）。
+  TextColumn get factText => text().withDefault(const Constant(''))();
+
+  DateTimeColumn get createdAt => dateTime().clientDefault(DateTime.now)();
+
+  @override
+  Set<Column<Object>> get primaryKey => <Column<Object>>{id};
+}
+
+/// 实体 ↔ 消息（哪些原文聊到过这个对象；原文仍在 `messages` 里）。
+@DataClassName('EntityTurnRow')
+@TableIndex(name: 'entity_turns_scope', columns: {#entityId})
+class EntityTurns extends Table {
+  TextColumn get characterId => text().withDefault(const Constant(''))();
+
+  TextColumn get entityId => text()();
+
+  TextColumn get messageId => text()();
+
+  /// 当时用户那句话的片段（`≤80 字`）。存一份是为了注入时显示「聊到：…」，
+  /// 不必再去解 `messages.content`（那可能是 blocks JSON）。
+  TextColumn get snippet => text().withDefault(const Constant(''))();
+
+  DateTimeColumn get at => dateTime().clientDefault(DateTime.now)();
+
+  @override
+  Set<Column<Object>> get primaryKey => <Column<Object>>{entityId, messageId};
+}
+
+/// 表意识槽位：「眼下在说谁」（每个会话最多 3 个实体 id + 时间，带 TTL）。
+@DataClassName('BrainWmStateRow')
+class BrainWmState extends Table {
+  TextColumn get characterId => text().withDefault(const Constant(''))();
+
+  TextColumn get sessionId => text()();
+
+  /// JSON：`{"ids":["e1"],"at":"2026-11-27T..."}`。
+  TextColumn get dataJson => text().withDefault(const Constant('{}'))();
+
+  DateTimeColumn get updatedAt => dateTime().clientDefault(DateTime.now)();
+
+  @override
+  Set<Column<Object>> get primaryKey => <Column<Object>>{sessionId};
+}
+
+// ---------------------------------------------------------------------------
 // 数据库
 // ---------------------------------------------------------------------------
 
@@ -437,6 +565,11 @@ class PersonaTraitRows extends Table {
     MoodStates,
     MoodHistory,
     PersonaTraitRows,
+    CharacterVersions,
+    Entities,
+    EntityFacts,
+    EntityTurns,
+    BrainWmState,
   ],
 )
 class AppDatabase extends _$AppDatabase {
@@ -447,7 +580,7 @@ class AppDatabase extends _$AppDatabase {
   factory AppDatabase.memory() => AppDatabase(NativeDatabase.memory());
 
   @override
-  int get schemaVersion => 5;
+  int get schemaVersion => 6;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -496,6 +629,19 @@ class AppDatabase extends _$AppDatabase {
             await _tryAddColumn(m, sessions, sessions.thinkingEnabled);
             await _tryAddColumn(m, sessions, sessions.thinkingLevel);
             await _tryAddColumn(m, sessions, sessions.contextKeepRounds);
+          }
+          if (from < 6) {
+            // v5 → v6（v0.4.35）：移植 dsh-brain 的三层 —— 角色自我定义（模型写、
+            // 带版本历史）、实体档案（患者/客户/项目）、表意识槽位（"眼下在说谁"）。
+            await _tryAddColumn(m, characters, characters.definition);
+            await _tryAddColumn(m, characters, characters.definitionVersion);
+            await _tryAddColumn(m, characters, characters.definitionSource);
+            await _tryAddColumn(m, characters, characters.definitionEvidence);
+            await m.createTable(characterVersions);
+            await m.createTable(entities);
+            await m.createTable(entityFacts);
+            await m.createTable(entityTurns);
+            await m.createTable(brainWmState);
           }
           // 兜底：缺表/缺索引补齐。注意不能直接 `m.createAll()`：
           // 老库的索引已经存在，createAll 会再次 CREATE INDEX 报
@@ -705,6 +851,9 @@ class AppDatabase extends _$AppDatabase {
   // -------------------------------------------------------------------------
 
   /// 新建角色卡并返回行。
+  ///
+  /// v0.4.35 起角色卡多了一层「模型写的自我定义」（`definition`），建卡时为空，
+  /// 等第一次后台整理再 bootstrap。
   Future<CharacterRow> createCharacter({
     String? id,
     required String name,
@@ -712,6 +861,10 @@ class AppDatabase extends _$AppDatabase {
     String? description,
     String emoji = '🤖',
     String source = 'manual',
+    String definition = '',
+    int definitionVersion = 0,
+    String definitionSource = '',
+    int definitionEvidence = 0,
   }) async {
     final now = DateTime.now();
     final card = CharacterRow(
@@ -723,6 +876,10 @@ class AppDatabase extends _$AppDatabase {
       source: source,
       createdAt: now,
       updatedAt: now,
+      definition: definition,
+      definitionVersion: definitionVersion,
+      definitionSource: definitionSource,
+      definitionEvidence: definitionEvidence,
     );
     await into(characters).insert(card);
     return card;

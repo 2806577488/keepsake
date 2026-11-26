@@ -117,6 +117,70 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 
   // -------------------------------------------------------------------------
+  // 专业规范（v0.4.35，移植自 dsh-brain 的规范层）
+  // -------------------------------------------------------------------------
+
+  Future<void> _specialty() async {
+    final settings = ref.read(settingsProvider);
+    final controller = TextEditingController(text: settings.specialtyRules);
+    final result = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) {
+        final s = KeepsakeSkinColors.of(dialogContext);
+        return AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: s.rSheet),
+          title: const Text('专业规范'),
+          content: SizedBox(
+            width: 520,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '这个领域的规矩：该做什么、不该做什么、什么时候让人去线下确认。'
+                  '会追加在系统提示词之后，每条一行。',
+                  style: Theme.of(dialogContext).textTheme.bodySmall,
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: controller,
+                  autofocus: true,
+                  minLines: 6,
+                  maxLines: 12,
+                  decoration: const InputDecoration(
+                    hintText: '例：\n- 先问清症状与病程，再谈辨证\n- 不给具体剂量，只讲配伍思路\n- 涉及急症一律建议就医',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              style: TextButton.styleFrom(
+                minimumSize: const Size(64, KeepsakeTheme.sheetButtonHeight),
+              ),
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(
+                minimumSize: const Size(64, KeepsakeTheme.sheetButtonHeight),
+              ),
+              onPressed: () =>
+                  Navigator.of(dialogContext).pop(controller.text.trim()),
+              child: const Text('保存'),
+            ),
+          ],
+        );
+      },
+    );
+    if (result == null || !mounted) return;
+    await ref.read(settingsProvider.notifier).setSpecialtyRules(result);
+    _toast(result.isEmpty ? '已关闭专业规范' : '专业规范已保存');
+  }
+
+  // -------------------------------------------------------------------------
   // 上下文预算
   // -------------------------------------------------------------------------
 
@@ -499,6 +563,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final rounds = settings.contextKeepRounds;
     final contextLabel = rounds > 0 ? '上下文：最近 $rounds 轮' : '上下文：不限制';
     final promptPreview = settings.systemPrompt.trim();
+    final specialtyPreview = settings.specialtyRules.trim();
 
     return Scaffold(
       appBar: AppBar(title: const Text('设置')),
@@ -519,6 +584,18 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 overflow: TextOverflow.ellipsis,
               ),
               onTap: _system,
+            ),
+            ListTile(
+              leading: const Icon(Icons.policy_outlined),
+              title: const Text('专业规范'),
+              subtitle: Text(
+                specialtyPreview.isEmpty
+                    ? '追加在系统提示词之后；留空则不注入'
+                    : specialtyPreview,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+              onTap: _specialty,
             ),
             ListTile(
               leading: Icon(
