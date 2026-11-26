@@ -15,6 +15,10 @@
 ///
 /// 语音：点麦克风切到「按住说话」区，pointerDown → 录音、pointerUp → 转写回填
 /// （[_onFieldPointerDown] / [_onFieldPointerUp] / [_onFieldPointerCancel]）。
+///
+/// 流式跟随（2026-11-26 重做）：跟随只在「用户自己贴着底」时生效；用户手指一碰
+/// 屏幕就立刻停跟随，而且**拖拽过程中绝不动 offset**（`ScrollPosition.jumpTo`
+/// 内部会 `goIdle`，贴在拖拽中间调用等于把用户的手势掐断 →「界面挪不动」）。
 library;
 
 import 'dart:async';
@@ -81,8 +85,23 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   /// 是否已经做过"进会话先贴底"的初始定位。
   bool _didInitialPin = false;
 
-  /// 是否自动跟随最新消息（用户往上翻时暂停）。
+  /// 是否自动跟随最新消息（用户一碰屏幕就停，回到最底部才恢复）。
+  ///
+  /// **重新开启**跟随的入口只有三个：
+  /// 1) 用户自己把列表拖/甩回最底部（[ScrollEndNotification] 且 `extentAfter <= 4`）；
+  /// 2) 点「回到底部」按钮（[_jumpToBottom]）；
+  /// 3) 发出新消息（[_send]）。
+  ///
+  /// 布局变化 / 内容变高 / `maxScrollExtent` 变化**都不再**开启跟随：
+  /// 旧实现把它们也当成"还在底部"的证据，结果流式时每个 token 都在把人按回底部。
   final ValueNotifier<bool> _autoFollow = ValueNotifier<bool>(true);
+
+  /// 用户的手指此刻是否按在列表上（或惯性甩动还没停）。
+  ///
+  /// 存在的唯一目的：跟随时**禁止**在拖拽中间改 offset。`ScrollPosition.jumpTo`
+  /// 会先 `goIdle()`，正在进行的拖拽被它掐断后剩下的手指移动就没人接了 ——
+  /// 表现就是「手指在屏幕上，列表却完全不跟手」。
+  bool _dragging = false;
 
   VoiceHoldController? _hold;
   StreamSubscription<VoiceHoldState>? _holdSub;
@@ -124,13 +143,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   void initState() {
     super.initState();
     _input.addListener(_onInputChanged);
-    _scroll.addListener(_onScrollMetricsFromController);
   }
 
   @override
   void dispose() {
     _input.removeListener(_onInputChanged);
-    _scroll.removeListener(_onScrollMetricsFromController);
     _scroll.dispose();
     _autoFollow.dispose();
     final hold = _hold;
@@ -182,31 +199,63 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   // 滚动
   // -------------------------------------------------------------------------
 
-  /// 离底多少算"贴着底"：设计 §2.1 的 80dp。
-  static const double _followThreshold = 80;
-
-  /// 用户此刻是否贴着底（流式跟随只在贴底时生效）。
+  /// 用户自己把列表送回底部多远以内，才重新开启跟随。
   ///
-  /// 依据是滚动度量 `extentAfter`（到底还有多少距离），而不是"最后一条是否可见"：
-  /// 最后一条比视口高时它会一直可见，导致用户上滑也被当成在底部（不能上滑看内容）。
-  void _onMetricsChanged(ScrollMetrics metrics, {bool userDrag = false}) {
+  /// 以前这里用的是设计稿 §2.1 的 80dp 宽容度；问题在于它同时被用来判断
+  /// "能不能继续跟随"：用户刚上滑 30dp 仍算"在底部"，于是下一个 token 到达时
+  /// 跟随又打开、又把人按回去 —— 这正是用户说的「还是跳、挪不动」。
+  /// 现在 80dp 那个阈值不再参与跟随判定，这里只留"真的在最底部"的 4dp 容差。
+  static const double _followResumeSlop = 4;
+
+  /// 布局/内容高度变化时的兜底：只在**真的在最底部**时重新开启跟随。
+  ///
+  /// 旧实现写的是 `extentAfter <= 80`，也就是「离底还有 79dp 也算在底部」，
+  /// 于是用户上滑 30dp 之后每个 token 到达都会把跟随重新打开，紧接着
+  /// `_pinToBottom` 把他按回底部 —— 这就是「上滑被拽回 / 界面挪不动」的直接原因。
+  /// 现在这里只"开"不"关"：关闭跟随只由用户手势触发（见 [_onScrollNotification]）。
+  void _onMetricsChanged(ScrollMetrics metrics) {
     if (!metrics.hasContentDimensions) return;
-    final bool atBottom = metrics.extentAfter <= _followThreshold;
-    if (atBottom) {
-      if (!_autoFollow.value) _autoFollow.value = true;
-      return;
-    }
-    // 只有**用户自己拖动**才停止跟随。
-    if (userDrag && _autoFollow.value) _autoFollow.value = false;
+    if (_dragging) return;
+    if (_autoFollow.value) return;
+    if (metrics.extentAfter <= _followResumeSlop) _autoFollow.value = true;
   }
 
-  /// ScrollController 自己的监听：程序贴底时不一定发滚动通知，这里兜一层。
-  void _onScrollMetricsFromController() {
-    if (!_scroll.hasClients) return;
-    final ScrollPosition p = _scroll.position;
-    if (!p.hasContentDimensions) return;
-    final bool atBottom = (p.maxScrollExtent - p.pixels) <= _followThreshold;
-    if (atBottom && !_autoFollow.value) _autoFollow.value = true;
+  /// 滚动通知：跟随的**唯一**关闭入口，以及"用户自己回到底部"的开启入口。
+  ///
+  /// 为什么一碰就关（而不是"离开 80dp 才关"）：流式时视口外还在长高，
+  /// 用户上滑 30dp 后 `extentAfter` 可能仍然 ≤ 80，按距离判会一直判成"在底部"，
+  /// 于是每次跟随都把他拽回去。以「手指是否参与」为准才是用户真正的意图。
+  void _onScrollNotification(ScrollNotification notification) {
+    // 消息里还有横向滚动的代码块，它们的通知会冒泡上来（depth 加 1）。
+    // 不过滤的话，横滑一下代码块就会把「回到底部」按钮的显隐状态改掉。
+    if (notification.depth != 0) return;
+    if (!notification.metrics.hasContentDimensions) return;
+    // 内容还没超过一屏（没有可滚的东西）时，触摸不该让按钮冒出来。
+    if (notification.metrics.maxScrollExtent <= 0) return;
+
+    if (notification is ScrollStartNotification) {
+      if (notification.dragDetails != null) {
+        _dragging = true;
+        if (_autoFollow.value) _autoFollow.value = false;
+      }
+      return;
+    }
+    if (notification is ScrollUpdateNotification) {
+      // 只有带 dragDetails 的才是用户手指发起的；程序贴底不会走到这里。
+      if (notification.dragDetails != null) {
+        _dragging = true;
+        if (_autoFollow.value) _autoFollow.value = false;
+      }
+      return;
+    }
+    if (notification is ScrollEndNotification) {
+      _dragging = false;
+      // 拖拽/甩动结束时**真的**在最底部，才认为用户想继续看最新内容。
+      if (!_autoFollow.value &&
+          notification.metrics.extentAfter <= _followResumeSlop) {
+        _autoFollow.value = true;
+      }
+    }
   }
 
   void _onInputChanged() {
@@ -214,8 +263,12 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   }
 
   /// 滚到底（[_jumpToBottom]）。
+  ///
+  /// 这是「用户明确要求回到底部」的入口（按钮 / 发消息 / 切分支）：
+  /// 顺带把 [_dragging] 清掉，万一某次拖拽的结束通知丢了，也不会永久卡住跟随。
   void _jumpToBottom({bool animate = true}) {
     _autoFollow.value = true;
+    _dragging = false;
     if (!mounted || !_scroll.hasClients) return;
     final ScrollPosition p = _scroll.position;
     if (!p.hasContentDimensions) return;
@@ -258,16 +311,16 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 
   DateTime _lastFollowAt = DateTime.fromMillisecondsSinceEpoch(0);
 
-  /// 流式跟随：**只在用户贴着底时**把列表钉到底部。
+  /// 流式跟随：**只在用户贴着底、且手指没在拖**时把列表钉到底部。
   ///
-  /// 2026-11-24 模拟器实测的两个问题都在这里：
-  /// 1) 以前用 120ms 的 `scrollTo` 动画，每 150ms 重起一次 → 输出区持续上下跳（抖动）；
-  ///    现在贴底时直接 `jumpTo`（无动画），文字高度增长由布局吸收，视觉上是"向上长"。
-  /// 2) 以前不管用户是否在底部都跟（判定还用了"最后一条可见"），上滑看思考/开头会被
-  ///    立刻拽回底部（"滑不动"）。现在 [ _autoFollow ] 由 `extentAfter` 决定，用户一旦
-  ///    离开底部就完全不跟随，只显示「回到底部」按钮。
+  /// 2026-11-24 版留下的两个问题（本次修）：
+  /// 1) 只要 `extentAfter <= 80` 就恢复跟随 → 上滑 30dp 之后每个 token 都被按回去；
+  /// 2) 拖拽中间也照样 `jumpTo` → `jumpTo` 内部 `goIdle()` 会掐断正在进行的拖拽，
+  ///    剩下的手指移动没人接，表现就是"界面挪不动"。
+  /// 现在两处都收口：开关只认用户手势（[_onScrollNotification]），
+  /// 且 [_dragging] 为真时一次 offset 都不改。
   void _scheduleFollow() {
-    if (!_autoFollow.value) return;
+    if (!_autoFollow.value || _dragging) return;
     final now = DateTime.now();
     final wait = _followInterval - now.difference(_lastFollowAt);
     if (wait > Duration.zero) {
@@ -297,11 +350,14 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   /// 「流式时一直回到输入框下方」。
   void _pinToBottom() {
     if (!mounted || !_scroll.hasClients) return;
+    // 拖拽期间一次 offset 都不改（jumpTo 会 goIdle 掐断手势）。
+    if (_dragging) return;
     final ScrollPosition p = _scroll.position;
     if (!p.hasContentDimensions) return;
     final double target = p.maxScrollExtent;
     if ((target - p.pixels).abs() > 0.5) p.jumpTo(target);
-    if (!_autoFollow.value) _autoFollow.value = true;
+    // 这里**不**再把 _autoFollow 打开：否则会形成"贴底→判定仍在底部→再贴底"
+    // 的自激回路，用户的上滑永远抢不过流式跟随。
   }
 
   // -------------------------------------------------------------------------
@@ -324,6 +380,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       if (mounted) setState(() => _sending = false);
     }
     if (!mounted) return;
+    // 新消息一定在底部：发出去就把用户带回底部（他之前上翻过也一样）。
+    // 这是「重新开启跟随」的三个显式入口之一（另外两个：手势回到底部、按钮）。
+    _jumpToBottom(animate: false);
     // 发送没成功（例如未配置平台）：把文字还给输入框，别让用户白打一遍。
     if (_state.messages.length == before && text.trim().isNotEmpty) {
       _input.text = text;
@@ -1069,8 +1128,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     );
     if (picked == null) return;
     await _controller.switchBranch(message.id, picked);
-    // 切换后滚到该消息所在位置（分支切换可能让链变短）。
-    _scheduleFollow();
+    // 分支切换会换掉链尾（可能变短），回到最新一条最直观。
+    _jumpToBottom();
   }
 
   /// 打开搜索结果链接。
@@ -1142,12 +1201,15 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     }
 
     // 流式/新消息到达时自动跟随底部。
+    //
+    // 这里只**发起**跟随，不决定能不能跟：能不能跟由 [_autoFollow] 说了算
+    // （用户一碰屏幕就关，回到最底部才开）。
     ref.listen<ChatUiState>(chatControllerProvider(widget.sessionId), (
-      ChatUiState? previous,
+      ChatUiState? _,
       ChatUiState next,
     ) {
-      final grew = next.messages.length > (previous?.messages.length ?? 0);
-      if (grew || next.streaming) _scheduleFollow();
+      if (!next.streaming) return;
+      _scheduleFollow();
     });
 
     final title = state.title.trim().isEmpty
@@ -1350,17 +1412,17 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       child: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 720),
-          // 「是不是贴着底」只认滚动度量（`extentAfter`），见 [_onMetricsChanged]。
+          // 跟随开关与「回到底部」按钮的显隐都只认这两个通知（见
+          // [_onScrollNotification] / [_onMetricsChanged]）。
           child: NotificationListener<ScrollMetricsNotification>(
             onNotification: (ScrollMetricsNotification n) {
-              _onMetricsChanged(n.metrics);
+              // 只认消息列表自己的度量（代码块横向滚动会带 depth 1 冒上来）。
+              if (n.depth == 0) _onMetricsChanged(n.metrics);
               return false;
             },
             child: NotificationListener<ScrollNotification>(
               onNotification: (ScrollNotification n) {
-                final bool userDrag =
-                    n is ScrollUpdateNotification && n.dragDetails != null;
-                _onMetricsChanged(n.metrics, userDrag: userDrag);
+                _onScrollNotification(n);
                 return false;
               },
               // 用普通 `ListView` + 自己的 ScrollController，而不是
