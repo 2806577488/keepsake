@@ -79,7 +79,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           shape: RoundedRectangleBorder(borderRadius: s.rSheet),
           title: const Text('系统提示词'),
           content: SizedBox(
-            width: 520,
+            width: _dialogWidth(dialogContext),
             child: TextField(
               controller: controller,
               autofocus: true,
@@ -122,6 +122,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   // 专业规范（v0.4.35，移植自 dsh-brain 的规范层）
   // -------------------------------------------------------------------------
 
+  /// 弹层内容宽度：按屏幕收窄（360dp 手机上固定 520 会横向溢出）。
+  double _dialogWidth(BuildContext context, {double max = 480}) {
+    final available = MediaQuery.sizeOf(context).width - 56;
+    if (available < 240) return 240;
+    return available > max ? max : available;
+  }
+
   Future<void> _specialty() async {
     final settings = ref.read(settingsProvider);
     final controller = TextEditingController(text: settings.specialtyRules);
@@ -133,7 +140,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           shape: RoundedRectangleBorder(borderRadius: s.rSheet),
           title: const Text('专业规范'),
           content: SizedBox(
-            width: 520,
+            width: _dialogWidth(dialogContext),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -148,11 +155,20 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   controller: controller,
                   autofocus: true,
                   minLines: 6,
-                  maxLines: 12,
+                  maxLines: 10,
                   decoration: const InputDecoration(
-                    hintText: '例：\n- 先问清症状与病程，再谈辨证\n- 不给具体剂量，只讲配伍思路\n- 涉及急症一律建议就医',
+                    hintText: '每行一条',
                     border: OutlineInputBorder(),
                   ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  '示例：\n'
+                  '- 先问清症状与病程，再谈辨证\n'
+                  '- 不给具体剂量，只讲配伍思路\n'
+                  '- 涉及急症一律建议就医',
+                  style: Theme.of(dialogContext).textTheme.bodySmall
+                      ?.copyWith(color: s.c.onV),
                 ),
               ],
             ),
@@ -199,7 +215,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           shape: RoundedRectangleBorder(borderRadius: s.rSheet),
           title: const Text('实体字段抽取'),
           content: SizedBox(
-            width: 420,
+            width: _dialogWidth(dialogContext, max: 420),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
