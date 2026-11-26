@@ -94,6 +94,7 @@ enum ThinkingLevel {
 class Settings {
   const Settings({
     this.systemPrompt = '',
+    this.specialtyRules = '',
     this.contextKeepRounds = kDefaultContextKeepRounds,
     this.contextWindowTokens = kDefaultContextWindowTokens,
     this.providerId = '',
@@ -115,6 +116,10 @@ class Settings {
 
   /// 系统提示词；空串表示用 [kDefaultSystemPrompt]（UI「留空则使用默认提示词」）。
   final String systemPrompt;
+
+  /// 专业规范（v0.4.35，移植自 dsh-brain 的规范层）：用户自己写的领域规矩，
+  /// 渲染成 `【专业规范】` 段追加在 [resolvedSystemPrompt] 之后。空串 = 不注入。
+  final String specialtyRules;
 
   /// 上下文预算：保留最近 N 轮；`<= 0` 表示「不限制（全部历史）」。
   final int contextKeepRounds;
@@ -180,6 +185,7 @@ class Settings {
 
   Settings copyWith({
     String? systemPrompt,
+    String? specialtyRules,
     int? contextKeepRounds,
     int? contextWindowTokens,
     String? providerId,
@@ -198,6 +204,7 @@ class Settings {
   }) {
     return Settings(
       systemPrompt: systemPrompt ?? this.systemPrompt,
+      specialtyRules: specialtyRules ?? this.specialtyRules,
       contextKeepRounds: contextKeepRounds ?? this.contextKeepRounds,
       contextWindowTokens: contextWindowTokens ?? this.contextWindowTokens,
       providerId: providerId ?? this.providerId,
@@ -219,6 +226,7 @@ class Settings {
   /// 持久化 JSON（snake_case，与旧版本数据兼容）。
   Map<String, Object?> toJson() => <String, Object?>{
     'system_prompt': systemPrompt,
+    'specialty_rules': specialtyRules,
     'context_keep_rounds': contextKeepRounds,
     'context_window_tokens': contextWindowTokens,
     'provider_id': providerId,
@@ -240,6 +248,7 @@ class Settings {
   factory Settings.fromJson(Map<String, Object?> json) {
     return Settings(
       systemPrompt: _str(json, 'system_prompt', 'systemPrompt') ?? '',
+      specialtyRules: _str(json, 'specialty_rules', 'specialtyRules') ?? '',
       contextKeepRounds:
           _int(json, 'context_keep_rounds', 'contextKeepRounds') ??
           kDefaultContextKeepRounds,
@@ -277,6 +286,7 @@ class Settings {
   bool operator ==(Object other) =>
       other is Settings &&
       other.systemPrompt == systemPrompt &&
+      other.specialtyRules == specialtyRules &&
       other.contextKeepRounds == contextKeepRounds &&
       other.contextWindowTokens == contextWindowTokens &&
       other.providerId == providerId &&
@@ -296,6 +306,7 @@ class Settings {
   @override
   int get hashCode => Object.hash(
     systemPrompt,
+    specialtyRules,
     contextKeepRounds,
     contextWindowTokens,
     providerId,
@@ -383,6 +394,7 @@ class SettingsStore extends ChangeNotifier {
   /// 便捷：在现有值上打补丁。
   Future<void> patch({
     String? systemPrompt,
+    String? specialtyRules,
     int? contextKeepRounds,
     int? contextWindowTokens,
     String? providerId,
@@ -401,6 +413,7 @@ class SettingsStore extends ChangeNotifier {
   }) => update(
     _value.copyWith(
       systemPrompt: systemPrompt,
+      specialtyRules: specialtyRules,
       contextKeepRounds: contextKeepRounds,
       contextWindowTokens: contextWindowTokens,
       providerId: providerId,
@@ -460,6 +473,10 @@ class SettingsController extends Notifier<Settings> {
 
   Future<void> setSystemPrompt(String value) =>
       store.patch(systemPrompt: value);
+
+  /// 专业规范（v0.4.35）：空串表示不注入。
+  Future<void> setSpecialtyRules(String value) =>
+      store.patch(specialtyRules: value.trim());
 
   Future<void> setContextKeepRounds(int rounds) =>
       store.patch(contextKeepRounds: rounds < 0 ? 0 : rounds);

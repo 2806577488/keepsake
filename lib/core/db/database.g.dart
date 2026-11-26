@@ -2924,6 +2924,53 @@ class $CharactersTable extends Characters
     requiredDuringInsert: false,
     defaultValue: const Constant('manual'),
   );
+  static const VerificationMeta _definitionMeta = const VerificationMeta(
+    'definition',
+  );
+  @override
+  late final GeneratedColumn<String> definition = GeneratedColumn<String>(
+    'definition',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(''),
+  );
+  static const VerificationMeta _definitionVersionMeta = const VerificationMeta(
+    'definitionVersion',
+  );
+  @override
+  late final GeneratedColumn<int> definitionVersion = GeneratedColumn<int>(
+    'definition_version',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
+  static const VerificationMeta _definitionSourceMeta = const VerificationMeta(
+    'definitionSource',
+  );
+  @override
+  late final GeneratedColumn<String> definitionSource = GeneratedColumn<String>(
+    'definition_source',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(''),
+  );
+  static const VerificationMeta _definitionEvidenceMeta =
+      const VerificationMeta('definitionEvidence');
+  @override
+  late final GeneratedColumn<int> definitionEvidence = GeneratedColumn<int>(
+    'definition_evidence',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
   static const VerificationMeta _createdAtMeta = const VerificationMeta(
     'createdAt',
   );
@@ -2956,6 +3003,10 @@ class $CharactersTable extends Characters
     description,
     emoji,
     source,
+    definition,
+    definitionVersion,
+    definitionSource,
+    definitionEvidence,
     createdAt,
     updatedAt,
   ];
@@ -3009,6 +3060,39 @@ class $CharactersTable extends Characters
         source.isAcceptableOrUnknown(data['source']!, _sourceMeta),
       );
     }
+    if (data.containsKey('definition')) {
+      context.handle(
+        _definitionMeta,
+        definition.isAcceptableOrUnknown(data['definition']!, _definitionMeta),
+      );
+    }
+    if (data.containsKey('definition_version')) {
+      context.handle(
+        _definitionVersionMeta,
+        definitionVersion.isAcceptableOrUnknown(
+          data['definition_version']!,
+          _definitionVersionMeta,
+        ),
+      );
+    }
+    if (data.containsKey('definition_source')) {
+      context.handle(
+        _definitionSourceMeta,
+        definitionSource.isAcceptableOrUnknown(
+          data['definition_source']!,
+          _definitionSourceMeta,
+        ),
+      );
+    }
+    if (data.containsKey('definition_evidence')) {
+      context.handle(
+        _definitionEvidenceMeta,
+        definitionEvidence.isAcceptableOrUnknown(
+          data['definition_evidence']!,
+          _definitionEvidenceMeta,
+        ),
+      );
+    }
     if (data.containsKey('created_at')) {
       context.handle(
         _createdAtMeta,
@@ -3054,6 +3138,22 @@ class $CharactersTable extends Characters
         DriftSqlType.string,
         data['${effectivePrefix}source'],
       )!,
+      definition: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}definition'],
+      )!,
+      definitionVersion: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}definition_version'],
+      )!,
+      definitionSource: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}definition_source'],
+      )!,
+      definitionEvidence: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}definition_evidence'],
+      )!,
       createdAt: attachedDatabase.typeMapping.read(
         DriftSqlType.dateTime,
         data['${effectivePrefix}created_at'],
@@ -3088,6 +3188,18 @@ class CharacterRow extends DataClass implements Insertable<CharacterRow> {
 
   /// `manual` / `import` / `default`。
   final String source;
+
+  /// 自我定义正文（空串 = 还没 bootstrap）。
+  final String definition;
+
+  /// 版本号（0 = 未 bootstrap；≥1 = 已写过几版）。
+  final int definitionVersion;
+
+  /// `llm`（模型写的）/ `fallback`（无模型时的规则兜底）/ `''`（还没有）。
+  final String definitionSource;
+
+  /// 上次修订后攒了多少轮新证据（到阈值才再修订）。
+  final int definitionEvidence;
   final DateTime createdAt;
   final DateTime updatedAt;
   const CharacterRow({
@@ -3097,6 +3209,10 @@ class CharacterRow extends DataClass implements Insertable<CharacterRow> {
     this.description,
     required this.emoji,
     required this.source,
+    required this.definition,
+    required this.definitionVersion,
+    required this.definitionSource,
+    required this.definitionEvidence,
     required this.createdAt,
     required this.updatedAt,
   });
@@ -3111,6 +3227,10 @@ class CharacterRow extends DataClass implements Insertable<CharacterRow> {
     }
     map['emoji'] = Variable<String>(emoji);
     map['source'] = Variable<String>(source);
+    map['definition'] = Variable<String>(definition);
+    map['definition_version'] = Variable<int>(definitionVersion);
+    map['definition_source'] = Variable<String>(definitionSource);
+    map['definition_evidence'] = Variable<int>(definitionEvidence);
     map['created_at'] = Variable<DateTime>(createdAt);
     map['updated_at'] = Variable<DateTime>(updatedAt);
     return map;
@@ -3126,6 +3246,10 @@ class CharacterRow extends DataClass implements Insertable<CharacterRow> {
           : Value(description),
       emoji: Value(emoji),
       source: Value(source),
+      definition: Value(definition),
+      definitionVersion: Value(definitionVersion),
+      definitionSource: Value(definitionSource),
+      definitionEvidence: Value(definitionEvidence),
       createdAt: Value(createdAt),
       updatedAt: Value(updatedAt),
     );
@@ -3143,6 +3267,10 @@ class CharacterRow extends DataClass implements Insertable<CharacterRow> {
       description: serializer.fromJson<String?>(json['description']),
       emoji: serializer.fromJson<String>(json['emoji']),
       source: serializer.fromJson<String>(json['source']),
+      definition: serializer.fromJson<String>(json['definition']),
+      definitionVersion: serializer.fromJson<int>(json['definitionVersion']),
+      definitionSource: serializer.fromJson<String>(json['definitionSource']),
+      definitionEvidence: serializer.fromJson<int>(json['definitionEvidence']),
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
       updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
     );
@@ -3157,6 +3285,10 @@ class CharacterRow extends DataClass implements Insertable<CharacterRow> {
       'description': serializer.toJson<String?>(description),
       'emoji': serializer.toJson<String>(emoji),
       'source': serializer.toJson<String>(source),
+      'definition': serializer.toJson<String>(definition),
+      'definitionVersion': serializer.toJson<int>(definitionVersion),
+      'definitionSource': serializer.toJson<String>(definitionSource),
+      'definitionEvidence': serializer.toJson<int>(definitionEvidence),
       'createdAt': serializer.toJson<DateTime>(createdAt),
       'updatedAt': serializer.toJson<DateTime>(updatedAt),
     };
@@ -3169,6 +3301,10 @@ class CharacterRow extends DataClass implements Insertable<CharacterRow> {
     Value<String?> description = const Value.absent(),
     String? emoji,
     String? source,
+    String? definition,
+    int? definitionVersion,
+    String? definitionSource,
+    int? definitionEvidence,
     DateTime? createdAt,
     DateTime? updatedAt,
   }) => CharacterRow(
@@ -3178,6 +3314,10 @@ class CharacterRow extends DataClass implements Insertable<CharacterRow> {
     description: description.present ? description.value : this.description,
     emoji: emoji ?? this.emoji,
     source: source ?? this.source,
+    definition: definition ?? this.definition,
+    definitionVersion: definitionVersion ?? this.definitionVersion,
+    definitionSource: definitionSource ?? this.definitionSource,
+    definitionEvidence: definitionEvidence ?? this.definitionEvidence,
     createdAt: createdAt ?? this.createdAt,
     updatedAt: updatedAt ?? this.updatedAt,
   );
@@ -3191,6 +3331,18 @@ class CharacterRow extends DataClass implements Insertable<CharacterRow> {
           : this.description,
       emoji: data.emoji.present ? data.emoji.value : this.emoji,
       source: data.source.present ? data.source.value : this.source,
+      definition: data.definition.present
+          ? data.definition.value
+          : this.definition,
+      definitionVersion: data.definitionVersion.present
+          ? data.definitionVersion.value
+          : this.definitionVersion,
+      definitionSource: data.definitionSource.present
+          ? data.definitionSource.value
+          : this.definitionSource,
+      definitionEvidence: data.definitionEvidence.present
+          ? data.definitionEvidence.value
+          : this.definitionEvidence,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
       updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
     );
@@ -3205,6 +3357,10 @@ class CharacterRow extends DataClass implements Insertable<CharacterRow> {
           ..write('description: $description, ')
           ..write('emoji: $emoji, ')
           ..write('source: $source, ')
+          ..write('definition: $definition, ')
+          ..write('definitionVersion: $definitionVersion, ')
+          ..write('definitionSource: $definitionSource, ')
+          ..write('definitionEvidence: $definitionEvidence, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt')
           ..write(')'))
@@ -3219,6 +3375,10 @@ class CharacterRow extends DataClass implements Insertable<CharacterRow> {
     description,
     emoji,
     source,
+    definition,
+    definitionVersion,
+    definitionSource,
+    definitionEvidence,
     createdAt,
     updatedAt,
   );
@@ -3232,6 +3392,10 @@ class CharacterRow extends DataClass implements Insertable<CharacterRow> {
           other.description == this.description &&
           other.emoji == this.emoji &&
           other.source == this.source &&
+          other.definition == this.definition &&
+          other.definitionVersion == this.definitionVersion &&
+          other.definitionSource == this.definitionSource &&
+          other.definitionEvidence == this.definitionEvidence &&
           other.createdAt == this.createdAt &&
           other.updatedAt == this.updatedAt);
 }
@@ -3243,6 +3407,10 @@ class CharactersCompanion extends UpdateCompanion<CharacterRow> {
   final Value<String?> description;
   final Value<String> emoji;
   final Value<String> source;
+  final Value<String> definition;
+  final Value<int> definitionVersion;
+  final Value<String> definitionSource;
+  final Value<int> definitionEvidence;
   final Value<DateTime> createdAt;
   final Value<DateTime> updatedAt;
   final Value<int> rowid;
@@ -3253,6 +3421,10 @@ class CharactersCompanion extends UpdateCompanion<CharacterRow> {
     this.description = const Value.absent(),
     this.emoji = const Value.absent(),
     this.source = const Value.absent(),
+    this.definition = const Value.absent(),
+    this.definitionVersion = const Value.absent(),
+    this.definitionSource = const Value.absent(),
+    this.definitionEvidence = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
     this.rowid = const Value.absent(),
@@ -3264,6 +3436,10 @@ class CharactersCompanion extends UpdateCompanion<CharacterRow> {
     this.description = const Value.absent(),
     this.emoji = const Value.absent(),
     this.source = const Value.absent(),
+    this.definition = const Value.absent(),
+    this.definitionVersion = const Value.absent(),
+    this.definitionSource = const Value.absent(),
+    this.definitionEvidence = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
     this.rowid = const Value.absent(),
@@ -3275,6 +3451,10 @@ class CharactersCompanion extends UpdateCompanion<CharacterRow> {
     Expression<String>? description,
     Expression<String>? emoji,
     Expression<String>? source,
+    Expression<String>? definition,
+    Expression<int>? definitionVersion,
+    Expression<String>? definitionSource,
+    Expression<int>? definitionEvidence,
     Expression<DateTime>? createdAt,
     Expression<DateTime>? updatedAt,
     Expression<int>? rowid,
@@ -3286,6 +3466,10 @@ class CharactersCompanion extends UpdateCompanion<CharacterRow> {
       if (description != null) 'description': description,
       if (emoji != null) 'emoji': emoji,
       if (source != null) 'source': source,
+      if (definition != null) 'definition': definition,
+      if (definitionVersion != null) 'definition_version': definitionVersion,
+      if (definitionSource != null) 'definition_source': definitionSource,
+      if (definitionEvidence != null) 'definition_evidence': definitionEvidence,
       if (createdAt != null) 'created_at': createdAt,
       if (updatedAt != null) 'updated_at': updatedAt,
       if (rowid != null) 'rowid': rowid,
@@ -3299,6 +3483,10 @@ class CharactersCompanion extends UpdateCompanion<CharacterRow> {
     Value<String?>? description,
     Value<String>? emoji,
     Value<String>? source,
+    Value<String>? definition,
+    Value<int>? definitionVersion,
+    Value<String>? definitionSource,
+    Value<int>? definitionEvidence,
     Value<DateTime>? createdAt,
     Value<DateTime>? updatedAt,
     Value<int>? rowid,
@@ -3310,6 +3498,10 @@ class CharactersCompanion extends UpdateCompanion<CharacterRow> {
       description: description ?? this.description,
       emoji: emoji ?? this.emoji,
       source: source ?? this.source,
+      definition: definition ?? this.definition,
+      definitionVersion: definitionVersion ?? this.definitionVersion,
+      definitionSource: definitionSource ?? this.definitionSource,
+      definitionEvidence: definitionEvidence ?? this.definitionEvidence,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       rowid: rowid ?? this.rowid,
@@ -3337,6 +3529,18 @@ class CharactersCompanion extends UpdateCompanion<CharacterRow> {
     if (source.present) {
       map['source'] = Variable<String>(source.value);
     }
+    if (definition.present) {
+      map['definition'] = Variable<String>(definition.value);
+    }
+    if (definitionVersion.present) {
+      map['definition_version'] = Variable<int>(definitionVersion.value);
+    }
+    if (definitionSource.present) {
+      map['definition_source'] = Variable<String>(definitionSource.value);
+    }
+    if (definitionEvidence.present) {
+      map['definition_evidence'] = Variable<int>(definitionEvidence.value);
+    }
     if (createdAt.present) {
       map['created_at'] = Variable<DateTime>(createdAt.value);
     }
@@ -3358,6 +3562,10 @@ class CharactersCompanion extends UpdateCompanion<CharacterRow> {
           ..write('description: $description, ')
           ..write('emoji: $emoji, ')
           ..write('source: $source, ')
+          ..write('definition: $definition, ')
+          ..write('definitionVersion: $definitionVersion, ')
+          ..write('definitionSource: $definitionSource, ')
+          ..write('definitionEvidence: $definitionEvidence, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt, ')
           ..write('rowid: $rowid')
@@ -6383,6 +6591,1989 @@ class PersonaTraitRowsCompanion extends UpdateCompanion<PersonaTraitRow> {
   }
 }
 
+class $CharacterVersionsTable extends CharacterVersions
+    with TableInfo<$CharacterVersionsTable, CharacterVersionRow> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $CharacterVersionsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _characterIdMeta = const VerificationMeta(
+    'characterId',
+  );
+  @override
+  late final GeneratedColumn<String> characterId = GeneratedColumn<String>(
+    'character_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _versionMeta = const VerificationMeta(
+    'version',
+  );
+  @override
+  late final GeneratedColumn<int> version = GeneratedColumn<int>(
+    'version',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _definitionMeta = const VerificationMeta(
+    'definition',
+  );
+  @override
+  late final GeneratedColumn<String> definition = GeneratedColumn<String>(
+    'definition',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(''),
+  );
+  static const VerificationMeta _reasonMeta = const VerificationMeta('reason');
+  @override
+  late final GeneratedColumn<String> reason = GeneratedColumn<String>(
+    'reason',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(''),
+  );
+  static const VerificationMeta _createdAtMeta = const VerificationMeta(
+    'createdAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> createdAt = GeneratedColumn<DateTime>(
+    'created_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+    clientDefault: DateTime.now,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    characterId,
+    version,
+    definition,
+    reason,
+    createdAt,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'character_versions';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<CharacterVersionRow> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('character_id')) {
+      context.handle(
+        _characterIdMeta,
+        characterId.isAcceptableOrUnknown(
+          data['character_id']!,
+          _characterIdMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_characterIdMeta);
+    }
+    if (data.containsKey('version')) {
+      context.handle(
+        _versionMeta,
+        version.isAcceptableOrUnknown(data['version']!, _versionMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_versionMeta);
+    }
+    if (data.containsKey('definition')) {
+      context.handle(
+        _definitionMeta,
+        definition.isAcceptableOrUnknown(data['definition']!, _definitionMeta),
+      );
+    }
+    if (data.containsKey('reason')) {
+      context.handle(
+        _reasonMeta,
+        reason.isAcceptableOrUnknown(data['reason']!, _reasonMeta),
+      );
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(
+        _createdAtMeta,
+        createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta),
+      );
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {characterId, version};
+  @override
+  CharacterVersionRow map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return CharacterVersionRow(
+      characterId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}character_id'],
+      )!,
+      version: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}version'],
+      )!,
+      definition: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}definition'],
+      )!,
+      reason: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}reason'],
+      )!,
+      createdAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}created_at'],
+      )!,
+    );
+  }
+
+  @override
+  $CharacterVersionsTable createAlias(String alias) {
+    return $CharacterVersionsTable(attachedDatabase, alias);
+  }
+}
+
+class CharacterVersionRow extends DataClass
+    implements Insertable<CharacterVersionRow> {
+  final String characterId;
+  final int version;
+  final String definition;
+
+  /// `bootstrap` / `revise` / `fallback`。
+  final String reason;
+  final DateTime createdAt;
+  const CharacterVersionRow({
+    required this.characterId,
+    required this.version,
+    required this.definition,
+    required this.reason,
+    required this.createdAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['character_id'] = Variable<String>(characterId);
+    map['version'] = Variable<int>(version);
+    map['definition'] = Variable<String>(definition);
+    map['reason'] = Variable<String>(reason);
+    map['created_at'] = Variable<DateTime>(createdAt);
+    return map;
+  }
+
+  CharacterVersionsCompanion toCompanion(bool nullToAbsent) {
+    return CharacterVersionsCompanion(
+      characterId: Value(characterId),
+      version: Value(version),
+      definition: Value(definition),
+      reason: Value(reason),
+      createdAt: Value(createdAt),
+    );
+  }
+
+  factory CharacterVersionRow.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return CharacterVersionRow(
+      characterId: serializer.fromJson<String>(json['characterId']),
+      version: serializer.fromJson<int>(json['version']),
+      definition: serializer.fromJson<String>(json['definition']),
+      reason: serializer.fromJson<String>(json['reason']),
+      createdAt: serializer.fromJson<DateTime>(json['createdAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'characterId': serializer.toJson<String>(characterId),
+      'version': serializer.toJson<int>(version),
+      'definition': serializer.toJson<String>(definition),
+      'reason': serializer.toJson<String>(reason),
+      'createdAt': serializer.toJson<DateTime>(createdAt),
+    };
+  }
+
+  CharacterVersionRow copyWith({
+    String? characterId,
+    int? version,
+    String? definition,
+    String? reason,
+    DateTime? createdAt,
+  }) => CharacterVersionRow(
+    characterId: characterId ?? this.characterId,
+    version: version ?? this.version,
+    definition: definition ?? this.definition,
+    reason: reason ?? this.reason,
+    createdAt: createdAt ?? this.createdAt,
+  );
+  CharacterVersionRow copyWithCompanion(CharacterVersionsCompanion data) {
+    return CharacterVersionRow(
+      characterId: data.characterId.present
+          ? data.characterId.value
+          : this.characterId,
+      version: data.version.present ? data.version.value : this.version,
+      definition: data.definition.present
+          ? data.definition.value
+          : this.definition,
+      reason: data.reason.present ? data.reason.value : this.reason,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('CharacterVersionRow(')
+          ..write('characterId: $characterId, ')
+          ..write('version: $version, ')
+          ..write('definition: $definition, ')
+          ..write('reason: $reason, ')
+          ..write('createdAt: $createdAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode =>
+      Object.hash(characterId, version, definition, reason, createdAt);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is CharacterVersionRow &&
+          other.characterId == this.characterId &&
+          other.version == this.version &&
+          other.definition == this.definition &&
+          other.reason == this.reason &&
+          other.createdAt == this.createdAt);
+}
+
+class CharacterVersionsCompanion extends UpdateCompanion<CharacterVersionRow> {
+  final Value<String> characterId;
+  final Value<int> version;
+  final Value<String> definition;
+  final Value<String> reason;
+  final Value<DateTime> createdAt;
+  final Value<int> rowid;
+  const CharacterVersionsCompanion({
+    this.characterId = const Value.absent(),
+    this.version = const Value.absent(),
+    this.definition = const Value.absent(),
+    this.reason = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  CharacterVersionsCompanion.insert({
+    required String characterId,
+    required int version,
+    this.definition = const Value.absent(),
+    this.reason = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  }) : characterId = Value(characterId),
+       version = Value(version);
+  static Insertable<CharacterVersionRow> custom({
+    Expression<String>? characterId,
+    Expression<int>? version,
+    Expression<String>? definition,
+    Expression<String>? reason,
+    Expression<DateTime>? createdAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (characterId != null) 'character_id': characterId,
+      if (version != null) 'version': version,
+      if (definition != null) 'definition': definition,
+      if (reason != null) 'reason': reason,
+      if (createdAt != null) 'created_at': createdAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  CharacterVersionsCompanion copyWith({
+    Value<String>? characterId,
+    Value<int>? version,
+    Value<String>? definition,
+    Value<String>? reason,
+    Value<DateTime>? createdAt,
+    Value<int>? rowid,
+  }) {
+    return CharacterVersionsCompanion(
+      characterId: characterId ?? this.characterId,
+      version: version ?? this.version,
+      definition: definition ?? this.definition,
+      reason: reason ?? this.reason,
+      createdAt: createdAt ?? this.createdAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (characterId.present) {
+      map['character_id'] = Variable<String>(characterId.value);
+    }
+    if (version.present) {
+      map['version'] = Variable<int>(version.value);
+    }
+    if (definition.present) {
+      map['definition'] = Variable<String>(definition.value);
+    }
+    if (reason.present) {
+      map['reason'] = Variable<String>(reason.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<DateTime>(createdAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('CharacterVersionsCompanion(')
+          ..write('characterId: $characterId, ')
+          ..write('version: $version, ')
+          ..write('definition: $definition, ')
+          ..write('reason: $reason, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $EntitiesTable extends Entities
+    with TableInfo<$EntitiesTable, EntityRow> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $EntitiesTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _characterIdMeta = const VerificationMeta(
+    'characterId',
+  );
+  @override
+  late final GeneratedColumn<String> characterId = GeneratedColumn<String>(
+    'character_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(''),
+  );
+  static const VerificationMeta _kindMeta = const VerificationMeta('kind');
+  @override
+  late final GeneratedColumn<String> kind = GeneratedColumn<String>(
+    'kind',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('patient'),
+  );
+  static const VerificationMeta _nameMeta = const VerificationMeta('name');
+  @override
+  late final GeneratedColumn<String> name = GeneratedColumn<String>(
+    'name',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _aliasesJsonMeta = const VerificationMeta(
+    'aliasesJson',
+  );
+  @override
+  late final GeneratedColumn<String> aliasesJson = GeneratedColumn<String>(
+    'aliases_json',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('[]'),
+  );
+  static const VerificationMeta _createdAtMeta = const VerificationMeta(
+    'createdAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> createdAt = GeneratedColumn<DateTime>(
+    'created_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+    clientDefault: DateTime.now,
+  );
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> updatedAt = GeneratedColumn<DateTime>(
+    'updated_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+    clientDefault: DateTime.now,
+  );
+  static const VerificationMeta _lastSeenAtMeta = const VerificationMeta(
+    'lastSeenAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> lastSeenAt = GeneratedColumn<DateTime>(
+    'last_seen_at',
+    aliasedName,
+    true,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    characterId,
+    kind,
+    name,
+    aliasesJson,
+    createdAt,
+    updatedAt,
+    lastSeenAt,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'entities';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<EntityRow> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('character_id')) {
+      context.handle(
+        _characterIdMeta,
+        characterId.isAcceptableOrUnknown(
+          data['character_id']!,
+          _characterIdMeta,
+        ),
+      );
+    }
+    if (data.containsKey('kind')) {
+      context.handle(
+        _kindMeta,
+        kind.isAcceptableOrUnknown(data['kind']!, _kindMeta),
+      );
+    }
+    if (data.containsKey('name')) {
+      context.handle(
+        _nameMeta,
+        name.isAcceptableOrUnknown(data['name']!, _nameMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_nameMeta);
+    }
+    if (data.containsKey('aliases_json')) {
+      context.handle(
+        _aliasesJsonMeta,
+        aliasesJson.isAcceptableOrUnknown(
+          data['aliases_json']!,
+          _aliasesJsonMeta,
+        ),
+      );
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(
+        _createdAtMeta,
+        createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta),
+      );
+    }
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    }
+    if (data.containsKey('last_seen_at')) {
+      context.handle(
+        _lastSeenAtMeta,
+        lastSeenAt.isAcceptableOrUnknown(
+          data['last_seen_at']!,
+          _lastSeenAtMeta,
+        ),
+      );
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  EntityRow map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return EntityRow(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      characterId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}character_id'],
+      )!,
+      kind: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}kind'],
+      )!,
+      name: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}name'],
+      )!,
+      aliasesJson: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}aliases_json'],
+      )!,
+      createdAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}created_at'],
+      )!,
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}updated_at'],
+      )!,
+      lastSeenAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}last_seen_at'],
+      ),
+    );
+  }
+
+  @override
+  $EntitiesTable createAlias(String alias) {
+    return $EntitiesTable(attachedDatabase, alias);
+  }
+}
+
+class EntityRow extends DataClass implements Insertable<EntityRow> {
+  final String id;
+  final String characterId;
+
+  /// `patient` / `client` / `project` / `pet`。
+  final String kind;
+
+  /// 归一化后的名字（`患者张三` → `张三`）。
+  final String name;
+
+  /// 别名 JSON 数组（同一个人被叫过的其他名字）。
+  final String aliasesJson;
+  final DateTime createdAt;
+  final DateTime updatedAt;
+  final DateTime? lastSeenAt;
+  const EntityRow({
+    required this.id,
+    required this.characterId,
+    required this.kind,
+    required this.name,
+    required this.aliasesJson,
+    required this.createdAt,
+    required this.updatedAt,
+    this.lastSeenAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['character_id'] = Variable<String>(characterId);
+    map['kind'] = Variable<String>(kind);
+    map['name'] = Variable<String>(name);
+    map['aliases_json'] = Variable<String>(aliasesJson);
+    map['created_at'] = Variable<DateTime>(createdAt);
+    map['updated_at'] = Variable<DateTime>(updatedAt);
+    if (!nullToAbsent || lastSeenAt != null) {
+      map['last_seen_at'] = Variable<DateTime>(lastSeenAt);
+    }
+    return map;
+  }
+
+  EntitiesCompanion toCompanion(bool nullToAbsent) {
+    return EntitiesCompanion(
+      id: Value(id),
+      characterId: Value(characterId),
+      kind: Value(kind),
+      name: Value(name),
+      aliasesJson: Value(aliasesJson),
+      createdAt: Value(createdAt),
+      updatedAt: Value(updatedAt),
+      lastSeenAt: lastSeenAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(lastSeenAt),
+    );
+  }
+
+  factory EntityRow.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return EntityRow(
+      id: serializer.fromJson<String>(json['id']),
+      characterId: serializer.fromJson<String>(json['characterId']),
+      kind: serializer.fromJson<String>(json['kind']),
+      name: serializer.fromJson<String>(json['name']),
+      aliasesJson: serializer.fromJson<String>(json['aliasesJson']),
+      createdAt: serializer.fromJson<DateTime>(json['createdAt']),
+      updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
+      lastSeenAt: serializer.fromJson<DateTime?>(json['lastSeenAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'characterId': serializer.toJson<String>(characterId),
+      'kind': serializer.toJson<String>(kind),
+      'name': serializer.toJson<String>(name),
+      'aliasesJson': serializer.toJson<String>(aliasesJson),
+      'createdAt': serializer.toJson<DateTime>(createdAt),
+      'updatedAt': serializer.toJson<DateTime>(updatedAt),
+      'lastSeenAt': serializer.toJson<DateTime?>(lastSeenAt),
+    };
+  }
+
+  EntityRow copyWith({
+    String? id,
+    String? characterId,
+    String? kind,
+    String? name,
+    String? aliasesJson,
+    DateTime? createdAt,
+    DateTime? updatedAt,
+    Value<DateTime?> lastSeenAt = const Value.absent(),
+  }) => EntityRow(
+    id: id ?? this.id,
+    characterId: characterId ?? this.characterId,
+    kind: kind ?? this.kind,
+    name: name ?? this.name,
+    aliasesJson: aliasesJson ?? this.aliasesJson,
+    createdAt: createdAt ?? this.createdAt,
+    updatedAt: updatedAt ?? this.updatedAt,
+    lastSeenAt: lastSeenAt.present ? lastSeenAt.value : this.lastSeenAt,
+  );
+  EntityRow copyWithCompanion(EntitiesCompanion data) {
+    return EntityRow(
+      id: data.id.present ? data.id.value : this.id,
+      characterId: data.characterId.present
+          ? data.characterId.value
+          : this.characterId,
+      kind: data.kind.present ? data.kind.value : this.kind,
+      name: data.name.present ? data.name.value : this.name,
+      aliasesJson: data.aliasesJson.present
+          ? data.aliasesJson.value
+          : this.aliasesJson,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+      lastSeenAt: data.lastSeenAt.present
+          ? data.lastSeenAt.value
+          : this.lastSeenAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('EntityRow(')
+          ..write('id: $id, ')
+          ..write('characterId: $characterId, ')
+          ..write('kind: $kind, ')
+          ..write('name: $name, ')
+          ..write('aliasesJson: $aliasesJson, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('lastSeenAt: $lastSeenAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    id,
+    characterId,
+    kind,
+    name,
+    aliasesJson,
+    createdAt,
+    updatedAt,
+    lastSeenAt,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is EntityRow &&
+          other.id == this.id &&
+          other.characterId == this.characterId &&
+          other.kind == this.kind &&
+          other.name == this.name &&
+          other.aliasesJson == this.aliasesJson &&
+          other.createdAt == this.createdAt &&
+          other.updatedAt == this.updatedAt &&
+          other.lastSeenAt == this.lastSeenAt);
+}
+
+class EntitiesCompanion extends UpdateCompanion<EntityRow> {
+  final Value<String> id;
+  final Value<String> characterId;
+  final Value<String> kind;
+  final Value<String> name;
+  final Value<String> aliasesJson;
+  final Value<DateTime> createdAt;
+  final Value<DateTime> updatedAt;
+  final Value<DateTime?> lastSeenAt;
+  final Value<int> rowid;
+  const EntitiesCompanion({
+    this.id = const Value.absent(),
+    this.characterId = const Value.absent(),
+    this.kind = const Value.absent(),
+    this.name = const Value.absent(),
+    this.aliasesJson = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.updatedAt = const Value.absent(),
+    this.lastSeenAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  EntitiesCompanion.insert({
+    required String id,
+    this.characterId = const Value.absent(),
+    this.kind = const Value.absent(),
+    required String name,
+    this.aliasesJson = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.updatedAt = const Value.absent(),
+    this.lastSeenAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  }) : id = Value(id),
+       name = Value(name);
+  static Insertable<EntityRow> custom({
+    Expression<String>? id,
+    Expression<String>? characterId,
+    Expression<String>? kind,
+    Expression<String>? name,
+    Expression<String>? aliasesJson,
+    Expression<DateTime>? createdAt,
+    Expression<DateTime>? updatedAt,
+    Expression<DateTime>? lastSeenAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (characterId != null) 'character_id': characterId,
+      if (kind != null) 'kind': kind,
+      if (name != null) 'name': name,
+      if (aliasesJson != null) 'aliases_json': aliasesJson,
+      if (createdAt != null) 'created_at': createdAt,
+      if (updatedAt != null) 'updated_at': updatedAt,
+      if (lastSeenAt != null) 'last_seen_at': lastSeenAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  EntitiesCompanion copyWith({
+    Value<String>? id,
+    Value<String>? characterId,
+    Value<String>? kind,
+    Value<String>? name,
+    Value<String>? aliasesJson,
+    Value<DateTime>? createdAt,
+    Value<DateTime>? updatedAt,
+    Value<DateTime?>? lastSeenAt,
+    Value<int>? rowid,
+  }) {
+    return EntitiesCompanion(
+      id: id ?? this.id,
+      characterId: characterId ?? this.characterId,
+      kind: kind ?? this.kind,
+      name: name ?? this.name,
+      aliasesJson: aliasesJson ?? this.aliasesJson,
+      createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+      lastSeenAt: lastSeenAt ?? this.lastSeenAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (characterId.present) {
+      map['character_id'] = Variable<String>(characterId.value);
+    }
+    if (kind.present) {
+      map['kind'] = Variable<String>(kind.value);
+    }
+    if (name.present) {
+      map['name'] = Variable<String>(name.value);
+    }
+    if (aliasesJson.present) {
+      map['aliases_json'] = Variable<String>(aliasesJson.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<DateTime>(createdAt.value);
+    }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<DateTime>(updatedAt.value);
+    }
+    if (lastSeenAt.present) {
+      map['last_seen_at'] = Variable<DateTime>(lastSeenAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('EntitiesCompanion(')
+          ..write('id: $id, ')
+          ..write('characterId: $characterId, ')
+          ..write('kind: $kind, ')
+          ..write('name: $name, ')
+          ..write('aliasesJson: $aliasesJson, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('lastSeenAt: $lastSeenAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $EntityFactsTable extends EntityFacts
+    with TableInfo<$EntityFactsTable, EntityFactRow> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $EntityFactsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _characterIdMeta = const VerificationMeta(
+    'characterId',
+  );
+  @override
+  late final GeneratedColumn<String> characterId = GeneratedColumn<String>(
+    'character_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(''),
+  );
+  static const VerificationMeta _entityIdMeta = const VerificationMeta(
+    'entityId',
+  );
+  @override
+  late final GeneratedColumn<String> entityId = GeneratedColumn<String>(
+    'entity_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _kindMeta = const VerificationMeta('kind');
+  @override
+  late final GeneratedColumn<String> kind = GeneratedColumn<String>(
+    'kind',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('备注'),
+  );
+  static const VerificationMeta _factTextMeta = const VerificationMeta(
+    'factText',
+  );
+  @override
+  late final GeneratedColumn<String> factText = GeneratedColumn<String>(
+    'fact_text',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(''),
+  );
+  static const VerificationMeta _createdAtMeta = const VerificationMeta(
+    'createdAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> createdAt = GeneratedColumn<DateTime>(
+    'created_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+    clientDefault: DateTime.now,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    characterId,
+    entityId,
+    kind,
+    factText,
+    createdAt,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'entity_facts';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<EntityFactRow> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('character_id')) {
+      context.handle(
+        _characterIdMeta,
+        characterId.isAcceptableOrUnknown(
+          data['character_id']!,
+          _characterIdMeta,
+        ),
+      );
+    }
+    if (data.containsKey('entity_id')) {
+      context.handle(
+        _entityIdMeta,
+        entityId.isAcceptableOrUnknown(data['entity_id']!, _entityIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_entityIdMeta);
+    }
+    if (data.containsKey('kind')) {
+      context.handle(
+        _kindMeta,
+        kind.isAcceptableOrUnknown(data['kind']!, _kindMeta),
+      );
+    }
+    if (data.containsKey('fact_text')) {
+      context.handle(
+        _factTextMeta,
+        factText.isAcceptableOrUnknown(data['fact_text']!, _factTextMeta),
+      );
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(
+        _createdAtMeta,
+        createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta),
+      );
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  EntityFactRow map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return EntityFactRow(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      characterId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}character_id'],
+      )!,
+      entityId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}entity_id'],
+      )!,
+      kind: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}kind'],
+      )!,
+      factText: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}fact_text'],
+      )!,
+      createdAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}created_at'],
+      )!,
+    );
+  }
+
+  @override
+  $EntityFactsTable createAlias(String alias) {
+    return $EntityFactsTable(attachedDatabase, alias);
+  }
+}
+
+class EntityFactRow extends DataClass implements Insertable<EntityFactRow> {
+  final String id;
+  final String characterId;
+  final String entityId;
+  final String kind;
+
+  /// `≤120 字`（列名带前缀，避免和 drift 的 `text()` 撞名）。
+  final String factText;
+  final DateTime createdAt;
+  const EntityFactRow({
+    required this.id,
+    required this.characterId,
+    required this.entityId,
+    required this.kind,
+    required this.factText,
+    required this.createdAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['character_id'] = Variable<String>(characterId);
+    map['entity_id'] = Variable<String>(entityId);
+    map['kind'] = Variable<String>(kind);
+    map['fact_text'] = Variable<String>(factText);
+    map['created_at'] = Variable<DateTime>(createdAt);
+    return map;
+  }
+
+  EntityFactsCompanion toCompanion(bool nullToAbsent) {
+    return EntityFactsCompanion(
+      id: Value(id),
+      characterId: Value(characterId),
+      entityId: Value(entityId),
+      kind: Value(kind),
+      factText: Value(factText),
+      createdAt: Value(createdAt),
+    );
+  }
+
+  factory EntityFactRow.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return EntityFactRow(
+      id: serializer.fromJson<String>(json['id']),
+      characterId: serializer.fromJson<String>(json['characterId']),
+      entityId: serializer.fromJson<String>(json['entityId']),
+      kind: serializer.fromJson<String>(json['kind']),
+      factText: serializer.fromJson<String>(json['factText']),
+      createdAt: serializer.fromJson<DateTime>(json['createdAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'characterId': serializer.toJson<String>(characterId),
+      'entityId': serializer.toJson<String>(entityId),
+      'kind': serializer.toJson<String>(kind),
+      'factText': serializer.toJson<String>(factText),
+      'createdAt': serializer.toJson<DateTime>(createdAt),
+    };
+  }
+
+  EntityFactRow copyWith({
+    String? id,
+    String? characterId,
+    String? entityId,
+    String? kind,
+    String? factText,
+    DateTime? createdAt,
+  }) => EntityFactRow(
+    id: id ?? this.id,
+    characterId: characterId ?? this.characterId,
+    entityId: entityId ?? this.entityId,
+    kind: kind ?? this.kind,
+    factText: factText ?? this.factText,
+    createdAt: createdAt ?? this.createdAt,
+  );
+  EntityFactRow copyWithCompanion(EntityFactsCompanion data) {
+    return EntityFactRow(
+      id: data.id.present ? data.id.value : this.id,
+      characterId: data.characterId.present
+          ? data.characterId.value
+          : this.characterId,
+      entityId: data.entityId.present ? data.entityId.value : this.entityId,
+      kind: data.kind.present ? data.kind.value : this.kind,
+      factText: data.factText.present ? data.factText.value : this.factText,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('EntityFactRow(')
+          ..write('id: $id, ')
+          ..write('characterId: $characterId, ')
+          ..write('entityId: $entityId, ')
+          ..write('kind: $kind, ')
+          ..write('factText: $factText, ')
+          ..write('createdAt: $createdAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode =>
+      Object.hash(id, characterId, entityId, kind, factText, createdAt);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is EntityFactRow &&
+          other.id == this.id &&
+          other.characterId == this.characterId &&
+          other.entityId == this.entityId &&
+          other.kind == this.kind &&
+          other.factText == this.factText &&
+          other.createdAt == this.createdAt);
+}
+
+class EntityFactsCompanion extends UpdateCompanion<EntityFactRow> {
+  final Value<String> id;
+  final Value<String> characterId;
+  final Value<String> entityId;
+  final Value<String> kind;
+  final Value<String> factText;
+  final Value<DateTime> createdAt;
+  final Value<int> rowid;
+  const EntityFactsCompanion({
+    this.id = const Value.absent(),
+    this.characterId = const Value.absent(),
+    this.entityId = const Value.absent(),
+    this.kind = const Value.absent(),
+    this.factText = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  EntityFactsCompanion.insert({
+    required String id,
+    this.characterId = const Value.absent(),
+    required String entityId,
+    this.kind = const Value.absent(),
+    this.factText = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  }) : id = Value(id),
+       entityId = Value(entityId);
+  static Insertable<EntityFactRow> custom({
+    Expression<String>? id,
+    Expression<String>? characterId,
+    Expression<String>? entityId,
+    Expression<String>? kind,
+    Expression<String>? factText,
+    Expression<DateTime>? createdAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (characterId != null) 'character_id': characterId,
+      if (entityId != null) 'entity_id': entityId,
+      if (kind != null) 'kind': kind,
+      if (factText != null) 'fact_text': factText,
+      if (createdAt != null) 'created_at': createdAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  EntityFactsCompanion copyWith({
+    Value<String>? id,
+    Value<String>? characterId,
+    Value<String>? entityId,
+    Value<String>? kind,
+    Value<String>? factText,
+    Value<DateTime>? createdAt,
+    Value<int>? rowid,
+  }) {
+    return EntityFactsCompanion(
+      id: id ?? this.id,
+      characterId: characterId ?? this.characterId,
+      entityId: entityId ?? this.entityId,
+      kind: kind ?? this.kind,
+      factText: factText ?? this.factText,
+      createdAt: createdAt ?? this.createdAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (characterId.present) {
+      map['character_id'] = Variable<String>(characterId.value);
+    }
+    if (entityId.present) {
+      map['entity_id'] = Variable<String>(entityId.value);
+    }
+    if (kind.present) {
+      map['kind'] = Variable<String>(kind.value);
+    }
+    if (factText.present) {
+      map['fact_text'] = Variable<String>(factText.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<DateTime>(createdAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('EntityFactsCompanion(')
+          ..write('id: $id, ')
+          ..write('characterId: $characterId, ')
+          ..write('entityId: $entityId, ')
+          ..write('kind: $kind, ')
+          ..write('factText: $factText, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $EntityTurnsTable extends EntityTurns
+    with TableInfo<$EntityTurnsTable, EntityTurnRow> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $EntityTurnsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _characterIdMeta = const VerificationMeta(
+    'characterId',
+  );
+  @override
+  late final GeneratedColumn<String> characterId = GeneratedColumn<String>(
+    'character_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(''),
+  );
+  static const VerificationMeta _entityIdMeta = const VerificationMeta(
+    'entityId',
+  );
+  @override
+  late final GeneratedColumn<String> entityId = GeneratedColumn<String>(
+    'entity_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _messageIdMeta = const VerificationMeta(
+    'messageId',
+  );
+  @override
+  late final GeneratedColumn<String> messageId = GeneratedColumn<String>(
+    'message_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _snippetMeta = const VerificationMeta(
+    'snippet',
+  );
+  @override
+  late final GeneratedColumn<String> snippet = GeneratedColumn<String>(
+    'snippet',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(''),
+  );
+  static const VerificationMeta _atMeta = const VerificationMeta('at');
+  @override
+  late final GeneratedColumn<DateTime> at = GeneratedColumn<DateTime>(
+    'at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+    clientDefault: DateTime.now,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    characterId,
+    entityId,
+    messageId,
+    snippet,
+    at,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'entity_turns';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<EntityTurnRow> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('character_id')) {
+      context.handle(
+        _characterIdMeta,
+        characterId.isAcceptableOrUnknown(
+          data['character_id']!,
+          _characterIdMeta,
+        ),
+      );
+    }
+    if (data.containsKey('entity_id')) {
+      context.handle(
+        _entityIdMeta,
+        entityId.isAcceptableOrUnknown(data['entity_id']!, _entityIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_entityIdMeta);
+    }
+    if (data.containsKey('message_id')) {
+      context.handle(
+        _messageIdMeta,
+        messageId.isAcceptableOrUnknown(data['message_id']!, _messageIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_messageIdMeta);
+    }
+    if (data.containsKey('snippet')) {
+      context.handle(
+        _snippetMeta,
+        snippet.isAcceptableOrUnknown(data['snippet']!, _snippetMeta),
+      );
+    }
+    if (data.containsKey('at')) {
+      context.handle(_atMeta, at.isAcceptableOrUnknown(data['at']!, _atMeta));
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {entityId, messageId};
+  @override
+  EntityTurnRow map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return EntityTurnRow(
+      characterId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}character_id'],
+      )!,
+      entityId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}entity_id'],
+      )!,
+      messageId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}message_id'],
+      )!,
+      snippet: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}snippet'],
+      )!,
+      at: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}at'],
+      )!,
+    );
+  }
+
+  @override
+  $EntityTurnsTable createAlias(String alias) {
+    return $EntityTurnsTable(attachedDatabase, alias);
+  }
+}
+
+class EntityTurnRow extends DataClass implements Insertable<EntityTurnRow> {
+  final String characterId;
+  final String entityId;
+  final String messageId;
+
+  /// 当时用户那句话的片段（`≤80 字`）。存一份是为了注入时显示「聊到：…」，
+  /// 不必再去解 `messages.content`（那可能是 blocks JSON）。
+  final String snippet;
+  final DateTime at;
+  const EntityTurnRow({
+    required this.characterId,
+    required this.entityId,
+    required this.messageId,
+    required this.snippet,
+    required this.at,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['character_id'] = Variable<String>(characterId);
+    map['entity_id'] = Variable<String>(entityId);
+    map['message_id'] = Variable<String>(messageId);
+    map['snippet'] = Variable<String>(snippet);
+    map['at'] = Variable<DateTime>(at);
+    return map;
+  }
+
+  EntityTurnsCompanion toCompanion(bool nullToAbsent) {
+    return EntityTurnsCompanion(
+      characterId: Value(characterId),
+      entityId: Value(entityId),
+      messageId: Value(messageId),
+      snippet: Value(snippet),
+      at: Value(at),
+    );
+  }
+
+  factory EntityTurnRow.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return EntityTurnRow(
+      characterId: serializer.fromJson<String>(json['characterId']),
+      entityId: serializer.fromJson<String>(json['entityId']),
+      messageId: serializer.fromJson<String>(json['messageId']),
+      snippet: serializer.fromJson<String>(json['snippet']),
+      at: serializer.fromJson<DateTime>(json['at']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'characterId': serializer.toJson<String>(characterId),
+      'entityId': serializer.toJson<String>(entityId),
+      'messageId': serializer.toJson<String>(messageId),
+      'snippet': serializer.toJson<String>(snippet),
+      'at': serializer.toJson<DateTime>(at),
+    };
+  }
+
+  EntityTurnRow copyWith({
+    String? characterId,
+    String? entityId,
+    String? messageId,
+    String? snippet,
+    DateTime? at,
+  }) => EntityTurnRow(
+    characterId: characterId ?? this.characterId,
+    entityId: entityId ?? this.entityId,
+    messageId: messageId ?? this.messageId,
+    snippet: snippet ?? this.snippet,
+    at: at ?? this.at,
+  );
+  EntityTurnRow copyWithCompanion(EntityTurnsCompanion data) {
+    return EntityTurnRow(
+      characterId: data.characterId.present
+          ? data.characterId.value
+          : this.characterId,
+      entityId: data.entityId.present ? data.entityId.value : this.entityId,
+      messageId: data.messageId.present ? data.messageId.value : this.messageId,
+      snippet: data.snippet.present ? data.snippet.value : this.snippet,
+      at: data.at.present ? data.at.value : this.at,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('EntityTurnRow(')
+          ..write('characterId: $characterId, ')
+          ..write('entityId: $entityId, ')
+          ..write('messageId: $messageId, ')
+          ..write('snippet: $snippet, ')
+          ..write('at: $at')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode =>
+      Object.hash(characterId, entityId, messageId, snippet, at);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is EntityTurnRow &&
+          other.characterId == this.characterId &&
+          other.entityId == this.entityId &&
+          other.messageId == this.messageId &&
+          other.snippet == this.snippet &&
+          other.at == this.at);
+}
+
+class EntityTurnsCompanion extends UpdateCompanion<EntityTurnRow> {
+  final Value<String> characterId;
+  final Value<String> entityId;
+  final Value<String> messageId;
+  final Value<String> snippet;
+  final Value<DateTime> at;
+  final Value<int> rowid;
+  const EntityTurnsCompanion({
+    this.characterId = const Value.absent(),
+    this.entityId = const Value.absent(),
+    this.messageId = const Value.absent(),
+    this.snippet = const Value.absent(),
+    this.at = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  EntityTurnsCompanion.insert({
+    this.characterId = const Value.absent(),
+    required String entityId,
+    required String messageId,
+    this.snippet = const Value.absent(),
+    this.at = const Value.absent(),
+    this.rowid = const Value.absent(),
+  }) : entityId = Value(entityId),
+       messageId = Value(messageId);
+  static Insertable<EntityTurnRow> custom({
+    Expression<String>? characterId,
+    Expression<String>? entityId,
+    Expression<String>? messageId,
+    Expression<String>? snippet,
+    Expression<DateTime>? at,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (characterId != null) 'character_id': characterId,
+      if (entityId != null) 'entity_id': entityId,
+      if (messageId != null) 'message_id': messageId,
+      if (snippet != null) 'snippet': snippet,
+      if (at != null) 'at': at,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  EntityTurnsCompanion copyWith({
+    Value<String>? characterId,
+    Value<String>? entityId,
+    Value<String>? messageId,
+    Value<String>? snippet,
+    Value<DateTime>? at,
+    Value<int>? rowid,
+  }) {
+    return EntityTurnsCompanion(
+      characterId: characterId ?? this.characterId,
+      entityId: entityId ?? this.entityId,
+      messageId: messageId ?? this.messageId,
+      snippet: snippet ?? this.snippet,
+      at: at ?? this.at,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (characterId.present) {
+      map['character_id'] = Variable<String>(characterId.value);
+    }
+    if (entityId.present) {
+      map['entity_id'] = Variable<String>(entityId.value);
+    }
+    if (messageId.present) {
+      map['message_id'] = Variable<String>(messageId.value);
+    }
+    if (snippet.present) {
+      map['snippet'] = Variable<String>(snippet.value);
+    }
+    if (at.present) {
+      map['at'] = Variable<DateTime>(at.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('EntityTurnsCompanion(')
+          ..write('characterId: $characterId, ')
+          ..write('entityId: $entityId, ')
+          ..write('messageId: $messageId, ')
+          ..write('snippet: $snippet, ')
+          ..write('at: $at, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $BrainWmStateTable extends BrainWmState
+    with TableInfo<$BrainWmStateTable, BrainWmStateRow> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $BrainWmStateTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _characterIdMeta = const VerificationMeta(
+    'characterId',
+  );
+  @override
+  late final GeneratedColumn<String> characterId = GeneratedColumn<String>(
+    'character_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(''),
+  );
+  static const VerificationMeta _sessionIdMeta = const VerificationMeta(
+    'sessionId',
+  );
+  @override
+  late final GeneratedColumn<String> sessionId = GeneratedColumn<String>(
+    'session_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _dataJsonMeta = const VerificationMeta(
+    'dataJson',
+  );
+  @override
+  late final GeneratedColumn<String> dataJson = GeneratedColumn<String>(
+    'data_json',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('{}'),
+  );
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> updatedAt = GeneratedColumn<DateTime>(
+    'updated_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+    clientDefault: DateTime.now,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    characterId,
+    sessionId,
+    dataJson,
+    updatedAt,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'brain_wm_state';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<BrainWmStateRow> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('character_id')) {
+      context.handle(
+        _characterIdMeta,
+        characterId.isAcceptableOrUnknown(
+          data['character_id']!,
+          _characterIdMeta,
+        ),
+      );
+    }
+    if (data.containsKey('session_id')) {
+      context.handle(
+        _sessionIdMeta,
+        sessionId.isAcceptableOrUnknown(data['session_id']!, _sessionIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_sessionIdMeta);
+    }
+    if (data.containsKey('data_json')) {
+      context.handle(
+        _dataJsonMeta,
+        dataJson.isAcceptableOrUnknown(data['data_json']!, _dataJsonMeta),
+      );
+    }
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {sessionId};
+  @override
+  BrainWmStateRow map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return BrainWmStateRow(
+      characterId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}character_id'],
+      )!,
+      sessionId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}session_id'],
+      )!,
+      dataJson: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}data_json'],
+      )!,
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}updated_at'],
+      )!,
+    );
+  }
+
+  @override
+  $BrainWmStateTable createAlias(String alias) {
+    return $BrainWmStateTable(attachedDatabase, alias);
+  }
+}
+
+class BrainWmStateRow extends DataClass implements Insertable<BrainWmStateRow> {
+  final String characterId;
+  final String sessionId;
+
+  /// JSON：`{"ids":["e1"],"at":"2026-11-27T..."}`。
+  final String dataJson;
+  final DateTime updatedAt;
+  const BrainWmStateRow({
+    required this.characterId,
+    required this.sessionId,
+    required this.dataJson,
+    required this.updatedAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['character_id'] = Variable<String>(characterId);
+    map['session_id'] = Variable<String>(sessionId);
+    map['data_json'] = Variable<String>(dataJson);
+    map['updated_at'] = Variable<DateTime>(updatedAt);
+    return map;
+  }
+
+  BrainWmStateCompanion toCompanion(bool nullToAbsent) {
+    return BrainWmStateCompanion(
+      characterId: Value(characterId),
+      sessionId: Value(sessionId),
+      dataJson: Value(dataJson),
+      updatedAt: Value(updatedAt),
+    );
+  }
+
+  factory BrainWmStateRow.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return BrainWmStateRow(
+      characterId: serializer.fromJson<String>(json['characterId']),
+      sessionId: serializer.fromJson<String>(json['sessionId']),
+      dataJson: serializer.fromJson<String>(json['dataJson']),
+      updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'characterId': serializer.toJson<String>(characterId),
+      'sessionId': serializer.toJson<String>(sessionId),
+      'dataJson': serializer.toJson<String>(dataJson),
+      'updatedAt': serializer.toJson<DateTime>(updatedAt),
+    };
+  }
+
+  BrainWmStateRow copyWith({
+    String? characterId,
+    String? sessionId,
+    String? dataJson,
+    DateTime? updatedAt,
+  }) => BrainWmStateRow(
+    characterId: characterId ?? this.characterId,
+    sessionId: sessionId ?? this.sessionId,
+    dataJson: dataJson ?? this.dataJson,
+    updatedAt: updatedAt ?? this.updatedAt,
+  );
+  BrainWmStateRow copyWithCompanion(BrainWmStateCompanion data) {
+    return BrainWmStateRow(
+      characterId: data.characterId.present
+          ? data.characterId.value
+          : this.characterId,
+      sessionId: data.sessionId.present ? data.sessionId.value : this.sessionId,
+      dataJson: data.dataJson.present ? data.dataJson.value : this.dataJson,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('BrainWmStateRow(')
+          ..write('characterId: $characterId, ')
+          ..write('sessionId: $sessionId, ')
+          ..write('dataJson: $dataJson, ')
+          ..write('updatedAt: $updatedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(characterId, sessionId, dataJson, updatedAt);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is BrainWmStateRow &&
+          other.characterId == this.characterId &&
+          other.sessionId == this.sessionId &&
+          other.dataJson == this.dataJson &&
+          other.updatedAt == this.updatedAt);
+}
+
+class BrainWmStateCompanion extends UpdateCompanion<BrainWmStateRow> {
+  final Value<String> characterId;
+  final Value<String> sessionId;
+  final Value<String> dataJson;
+  final Value<DateTime> updatedAt;
+  final Value<int> rowid;
+  const BrainWmStateCompanion({
+    this.characterId = const Value.absent(),
+    this.sessionId = const Value.absent(),
+    this.dataJson = const Value.absent(),
+    this.updatedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  BrainWmStateCompanion.insert({
+    this.characterId = const Value.absent(),
+    required String sessionId,
+    this.dataJson = const Value.absent(),
+    this.updatedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  }) : sessionId = Value(sessionId);
+  static Insertable<BrainWmStateRow> custom({
+    Expression<String>? characterId,
+    Expression<String>? sessionId,
+    Expression<String>? dataJson,
+    Expression<DateTime>? updatedAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (characterId != null) 'character_id': characterId,
+      if (sessionId != null) 'session_id': sessionId,
+      if (dataJson != null) 'data_json': dataJson,
+      if (updatedAt != null) 'updated_at': updatedAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  BrainWmStateCompanion copyWith({
+    Value<String>? characterId,
+    Value<String>? sessionId,
+    Value<String>? dataJson,
+    Value<DateTime>? updatedAt,
+    Value<int>? rowid,
+  }) {
+    return BrainWmStateCompanion(
+      characterId: characterId ?? this.characterId,
+      sessionId: sessionId ?? this.sessionId,
+      dataJson: dataJson ?? this.dataJson,
+      updatedAt: updatedAt ?? this.updatedAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (characterId.present) {
+      map['character_id'] = Variable<String>(characterId.value);
+    }
+    if (sessionId.present) {
+      map['session_id'] = Variable<String>(sessionId.value);
+    }
+    if (dataJson.present) {
+      map['data_json'] = Variable<String>(dataJson.value);
+    }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<DateTime>(updatedAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('BrainWmStateCompanion(')
+          ..write('characterId: $characterId, ')
+          ..write('sessionId: $sessionId, ')
+          ..write('dataJson: $dataJson, ')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
@@ -6403,6 +8594,12 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final $PersonaTraitRowsTable personaTraitRows = $PersonaTraitRowsTable(
     this,
   );
+  late final $CharacterVersionsTable characterVersions =
+      $CharacterVersionsTable(this);
+  late final $EntitiesTable entities = $EntitiesTable(this);
+  late final $EntityFactsTable entityFacts = $EntityFactsTable(this);
+  late final $EntityTurnsTable entityTurns = $EntityTurnsTable(this);
+  late final $BrainWmStateTable brainWmState = $BrainWmStateTable(this);
   late final Index sessionsUpdated = Index(
     'sessions_updated',
     'CREATE INDEX sessions_updated ON sessions (updated_at)',
@@ -6431,6 +8628,26 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     'mood_history_scope',
     'CREATE INDEX mood_history_scope ON mood_history (character_id, created_at)',
   );
+  late final Index characterVersionsAt = Index(
+    'character_versions_at',
+    'CREATE INDEX character_versions_at ON character_versions (character_id, version)',
+  );
+  late final Index entitiesScope = Index(
+    'entities_scope',
+    'CREATE INDEX entities_scope ON entities (character_id, name)',
+  );
+  late final Index entitiesUpdated = Index(
+    'entities_updated',
+    'CREATE INDEX entities_updated ON entities (character_id, updated_at)',
+  );
+  late final Index entityFactsScope = Index(
+    'entity_facts_scope',
+    'CREATE INDEX entity_facts_scope ON entity_facts (entity_id, created_at)',
+  );
+  late final Index entityTurnsScope = Index(
+    'entity_turns_scope',
+    'CREATE INDEX entity_turns_scope ON entity_turns (entity_id)',
+  );
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -6448,6 +8665,11 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     moodStates,
     moodHistory,
     personaTraitRows,
+    characterVersions,
+    entities,
+    entityFacts,
+    entityTurns,
+    brainWmState,
     sessionsUpdated,
     messagesSession,
     attachmentsSession,
@@ -6455,6 +8677,11 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     memoryFactsScope,
     memoryEpisodesScope,
     moodHistoryScope,
+    characterVersionsAt,
+    entitiesScope,
+    entitiesUpdated,
+    entityFactsScope,
+    entityTurnsScope,
   ];
   @override
   StreamQueryUpdateRules get streamUpdateRules => const StreamQueryUpdateRules([
@@ -8105,6 +10332,10 @@ typedef $$CharactersTableCreateCompanionBuilder = CharactersCompanion Function({
   Value<String?> description,
   Value<String> emoji,
   Value<String> source,
+  Value<String> definition,
+  Value<int> definitionVersion,
+  Value<String> definitionSource,
+  Value<int> definitionEvidence,
   Value<DateTime> createdAt,
   Value<DateTime> updatedAt,
   Value<int> rowid,
@@ -8116,6 +10347,10 @@ typedef $$CharactersTableUpdateCompanionBuilder = CharactersCompanion Function({
   Value<String?> description,
   Value<String> emoji,
   Value<String> source,
+  Value<String> definition,
+  Value<int> definitionVersion,
+  Value<String> definitionSource,
+  Value<int> definitionEvidence,
   Value<DateTime> createdAt,
   Value<DateTime> updatedAt,
   Value<int> rowid,
@@ -8157,6 +10392,26 @@ class $$CharactersTableFilterComposer
 
   ColumnFilters<String> get source => $composableBuilder(
     column: $table.source,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get definition => $composableBuilder(
+    column: $table.definition,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get definitionVersion => $composableBuilder(
+    column: $table.definitionVersion,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get definitionSource => $composableBuilder(
+    column: $table.definitionSource,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get definitionEvidence => $composableBuilder(
+    column: $table.definitionEvidence,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -8210,6 +10465,26 @@ class $$CharactersTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get definition => $composableBuilder(
+    column: $table.definition,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get definitionVersion => $composableBuilder(
+    column: $table.definitionVersion,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get definitionSource => $composableBuilder(
+    column: $table.definitionSource,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get definitionEvidence => $composableBuilder(
+    column: $table.definitionEvidence,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<DateTime> get createdAt => $composableBuilder(
     column: $table.createdAt,
     builder: (column) => ColumnOrderings(column),
@@ -8249,6 +10524,26 @@ class $$CharactersTableAnnotationComposer
 
   GeneratedColumn<String> get source =>
       $composableBuilder(column: $table.source, builder: (column) => column);
+
+  GeneratedColumn<String> get definition => $composableBuilder(
+    column: $table.definition,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get definitionVersion => $composableBuilder(
+    column: $table.definitionVersion,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get definitionSource => $composableBuilder(
+    column: $table.definitionSource,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get definitionEvidence => $composableBuilder(
+    column: $table.definitionEvidence,
+    builder: (column) => column,
+  );
 
   GeneratedColumn<DateTime> get createdAt =>
       $composableBuilder(column: $table.createdAt, builder: (column) => column);
@@ -8294,6 +10589,10 @@ class $$CharactersTableTableManager
                 Value<String?> description = const Value.absent(),
                 Value<String> emoji = const Value.absent(),
                 Value<String> source = const Value.absent(),
+                Value<String> definition = const Value.absent(),
+                Value<int> definitionVersion = const Value.absent(),
+                Value<String> definitionSource = const Value.absent(),
+                Value<int> definitionEvidence = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
                 Value<DateTime> updatedAt = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
@@ -8304,6 +10603,10 @@ class $$CharactersTableTableManager
                 description: description,
                 emoji: emoji,
                 source: source,
+                definition: definition,
+                definitionVersion: definitionVersion,
+                definitionSource: definitionSource,
+                definitionEvidence: definitionEvidence,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
                 rowid: rowid,
@@ -8316,6 +10619,10 @@ class $$CharactersTableTableManager
                 Value<String?> description = const Value.absent(),
                 Value<String> emoji = const Value.absent(),
                 Value<String> source = const Value.absent(),
+                Value<String> definition = const Value.absent(),
+                Value<int> definitionVersion = const Value.absent(),
+                Value<String> definitionSource = const Value.absent(),
+                Value<int> definitionEvidence = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
                 Value<DateTime> updatedAt = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
@@ -8326,6 +10633,10 @@ class $$CharactersTableTableManager
                 description: description,
                 emoji: emoji,
                 source: source,
+                definition: definition,
+                definitionVersion: definitionVersion,
+                definitionSource: definitionSource,
+                definitionEvidence: definitionEvidence,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
                 rowid: rowid,
@@ -9980,6 +12291,1131 @@ typedef $$PersonaTraitRowsTableProcessedTableManager =
       PersonaTraitRow,
       PrefetchHooks Function()
     >;
+typedef $$CharacterVersionsTableCreateCompanionBuilder =
+    CharacterVersionsCompanion Function({
+      required String characterId,
+      required int version,
+      Value<String> definition,
+      Value<String> reason,
+      Value<DateTime> createdAt,
+      Value<int> rowid,
+    });
+typedef $$CharacterVersionsTableUpdateCompanionBuilder =
+    CharacterVersionsCompanion Function({
+      Value<String> characterId,
+      Value<int> version,
+      Value<String> definition,
+      Value<String> reason,
+      Value<DateTime> createdAt,
+      Value<int> rowid,
+    });
+
+class $$CharacterVersionsTableFilterComposer
+    extends Composer<_$AppDatabase, $CharacterVersionsTable> {
+  $$CharacterVersionsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get characterId => $composableBuilder(
+    column: $table.characterId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get version => $composableBuilder(
+    column: $table.version,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get definition => $composableBuilder(
+    column: $table.definition,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get reason => $composableBuilder(
+    column: $table.reason,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$CharacterVersionsTableOrderingComposer
+    extends Composer<_$AppDatabase, $CharacterVersionsTable> {
+  $$CharacterVersionsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get characterId => $composableBuilder(
+    column: $table.characterId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get version => $composableBuilder(
+    column: $table.version,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get definition => $composableBuilder(
+    column: $table.definition,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get reason => $composableBuilder(
+    column: $table.reason,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$CharacterVersionsTableAnnotationComposer
+    extends Composer<_$AppDatabase, $CharacterVersionsTable> {
+  $$CharacterVersionsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get characterId => $composableBuilder(
+    column: $table.characterId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get version =>
+      $composableBuilder(column: $table.version, builder: (column) => column);
+
+  GeneratedColumn<String> get definition => $composableBuilder(
+    column: $table.definition,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get reason =>
+      $composableBuilder(column: $table.reason, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+}
+
+class $$CharacterVersionsTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $CharacterVersionsTable,
+          CharacterVersionRow,
+          $$CharacterVersionsTableFilterComposer,
+          $$CharacterVersionsTableOrderingComposer,
+          $$CharacterVersionsTableAnnotationComposer,
+          $$CharacterVersionsTableCreateCompanionBuilder,
+          $$CharacterVersionsTableUpdateCompanionBuilder,
+          (
+            CharacterVersionRow,
+            BaseReferences<
+              _$AppDatabase,
+              $CharacterVersionsTable,
+              CharacterVersionRow
+            >,
+          ),
+          CharacterVersionRow,
+          PrefetchHooks Function()
+        > {
+  $$CharacterVersionsTableTableManager(
+    _$AppDatabase db,
+    $CharacterVersionsTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$CharacterVersionsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$CharacterVersionsTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$CharacterVersionsTableAnnotationComposer(
+                $db: db,
+                $table: table,
+              ),
+          updateCompanionCallback:
+              ({
+                Value<String> characterId = const Value.absent(),
+                Value<int> version = const Value.absent(),
+                Value<String> definition = const Value.absent(),
+                Value<String> reason = const Value.absent(),
+                Value<DateTime> createdAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => CharacterVersionsCompanion(
+                characterId: characterId,
+                version: version,
+                definition: definition,
+                reason: reason,
+                createdAt: createdAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String characterId,
+                required int version,
+                Value<String> definition = const Value.absent(),
+                Value<String> reason = const Value.absent(),
+                Value<DateTime> createdAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => CharacterVersionsCompanion.insert(
+                characterId: characterId,
+                version: version,
+                definition: definition,
+                reason: reason,
+                createdAt: createdAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<$CharacterVersionsTable, CharacterVersionRow>(
+                    table,
+                  ),
+                  BaseReferences<
+                    _$AppDatabase,
+                    $CharacterVersionsTable,
+                    CharacterVersionRow
+                  >(db, table, e),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$CharacterVersionsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $CharacterVersionsTable,
+      CharacterVersionRow,
+      $$CharacterVersionsTableFilterComposer,
+      $$CharacterVersionsTableOrderingComposer,
+      $$CharacterVersionsTableAnnotationComposer,
+      $$CharacterVersionsTableCreateCompanionBuilder,
+      $$CharacterVersionsTableUpdateCompanionBuilder,
+      (
+        CharacterVersionRow,
+        BaseReferences<
+          _$AppDatabase,
+          $CharacterVersionsTable,
+          CharacterVersionRow
+        >,
+      ),
+      CharacterVersionRow,
+      PrefetchHooks Function()
+    >;
+typedef $$EntitiesTableCreateCompanionBuilder = EntitiesCompanion Function({
+  required String id,
+  Value<String> characterId,
+  Value<String> kind,
+  required String name,
+  Value<String> aliasesJson,
+  Value<DateTime> createdAt,
+  Value<DateTime> updatedAt,
+  Value<DateTime?> lastSeenAt,
+  Value<int> rowid,
+});
+typedef $$EntitiesTableUpdateCompanionBuilder = EntitiesCompanion Function({
+  Value<String> id,
+  Value<String> characterId,
+  Value<String> kind,
+  Value<String> name,
+  Value<String> aliasesJson,
+  Value<DateTime> createdAt,
+  Value<DateTime> updatedAt,
+  Value<DateTime?> lastSeenAt,
+  Value<int> rowid,
+});
+
+class $$EntitiesTableFilterComposer
+    extends Composer<_$AppDatabase, $EntitiesTable> {
+  $$EntitiesTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get characterId => $composableBuilder(
+    column: $table.characterId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get kind => $composableBuilder(
+    column: $table.kind,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get aliasesJson => $composableBuilder(
+    column: $table.aliasesJson,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get lastSeenAt => $composableBuilder(
+    column: $table.lastSeenAt,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$EntitiesTableOrderingComposer
+    extends Composer<_$AppDatabase, $EntitiesTable> {
+  $$EntitiesTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get characterId => $composableBuilder(
+    column: $table.characterId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get kind => $composableBuilder(
+    column: $table.kind,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get aliasesJson => $composableBuilder(
+    column: $table.aliasesJson,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get lastSeenAt => $composableBuilder(
+    column: $table.lastSeenAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$EntitiesTableAnnotationComposer
+    extends Composer<_$AppDatabase, $EntitiesTable> {
+  $$EntitiesTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get characterId => $composableBuilder(
+    column: $table.characterId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get kind =>
+      $composableBuilder(column: $table.kind, builder: (column) => column);
+
+  GeneratedColumn<String> get name =>
+      $composableBuilder(column: $table.name, builder: (column) => column);
+
+  GeneratedColumn<String> get aliasesJson => $composableBuilder(
+    column: $table.aliasesJson,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<DateTime> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get lastSeenAt => $composableBuilder(
+    column: $table.lastSeenAt,
+    builder: (column) => column,
+  );
+}
+
+class $$EntitiesTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $EntitiesTable,
+          EntityRow,
+          $$EntitiesTableFilterComposer,
+          $$EntitiesTableOrderingComposer,
+          $$EntitiesTableAnnotationComposer,
+          $$EntitiesTableCreateCompanionBuilder,
+          $$EntitiesTableUpdateCompanionBuilder,
+          (EntityRow, BaseReferences<_$AppDatabase, $EntitiesTable, EntityRow>),
+          EntityRow,
+          PrefetchHooks Function()
+        > {
+  $$EntitiesTableTableManager(_$AppDatabase db, $EntitiesTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$EntitiesTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$EntitiesTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$EntitiesTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String> characterId = const Value.absent(),
+                Value<String> kind = const Value.absent(),
+                Value<String> name = const Value.absent(),
+                Value<String> aliasesJson = const Value.absent(),
+                Value<DateTime> createdAt = const Value.absent(),
+                Value<DateTime> updatedAt = const Value.absent(),
+                Value<DateTime?> lastSeenAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => EntitiesCompanion(
+                id: id,
+                characterId: characterId,
+                kind: kind,
+                name: name,
+                aliasesJson: aliasesJson,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+                lastSeenAt: lastSeenAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                Value<String> characterId = const Value.absent(),
+                Value<String> kind = const Value.absent(),
+                required String name,
+                Value<String> aliasesJson = const Value.absent(),
+                Value<DateTime> createdAt = const Value.absent(),
+                Value<DateTime> updatedAt = const Value.absent(),
+                Value<DateTime?> lastSeenAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => EntitiesCompanion.insert(
+                id: id,
+                characterId: characterId,
+                kind: kind,
+                name: name,
+                aliasesJson: aliasesJson,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+                lastSeenAt: lastSeenAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<$EntitiesTable, EntityRow>(table),
+                  BaseReferences<_$AppDatabase, $EntitiesTable, EntityRow>(
+                    db,
+                    table,
+                    e,
+                  ),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$EntitiesTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $EntitiesTable,
+      EntityRow,
+      $$EntitiesTableFilterComposer,
+      $$EntitiesTableOrderingComposer,
+      $$EntitiesTableAnnotationComposer,
+      $$EntitiesTableCreateCompanionBuilder,
+      $$EntitiesTableUpdateCompanionBuilder,
+      (EntityRow, BaseReferences<_$AppDatabase, $EntitiesTable, EntityRow>),
+      EntityRow,
+      PrefetchHooks Function()
+    >;
+typedef $$EntityFactsTableCreateCompanionBuilder =
+    EntityFactsCompanion Function({
+      required String id,
+      Value<String> characterId,
+      required String entityId,
+      Value<String> kind,
+      Value<String> factText,
+      Value<DateTime> createdAt,
+      Value<int> rowid,
+    });
+typedef $$EntityFactsTableUpdateCompanionBuilder =
+    EntityFactsCompanion Function({
+      Value<String> id,
+      Value<String> characterId,
+      Value<String> entityId,
+      Value<String> kind,
+      Value<String> factText,
+      Value<DateTime> createdAt,
+      Value<int> rowid,
+    });
+
+class $$EntityFactsTableFilterComposer
+    extends Composer<_$AppDatabase, $EntityFactsTable> {
+  $$EntityFactsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get characterId => $composableBuilder(
+    column: $table.characterId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get entityId => $composableBuilder(
+    column: $table.entityId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get kind => $composableBuilder(
+    column: $table.kind,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get factText => $composableBuilder(
+    column: $table.factText,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$EntityFactsTableOrderingComposer
+    extends Composer<_$AppDatabase, $EntityFactsTable> {
+  $$EntityFactsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get characterId => $composableBuilder(
+    column: $table.characterId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get entityId => $composableBuilder(
+    column: $table.entityId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get kind => $composableBuilder(
+    column: $table.kind,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get factText => $composableBuilder(
+    column: $table.factText,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$EntityFactsTableAnnotationComposer
+    extends Composer<_$AppDatabase, $EntityFactsTable> {
+  $$EntityFactsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get characterId => $composableBuilder(
+    column: $table.characterId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get entityId =>
+      $composableBuilder(column: $table.entityId, builder: (column) => column);
+
+  GeneratedColumn<String> get kind =>
+      $composableBuilder(column: $table.kind, builder: (column) => column);
+
+  GeneratedColumn<String> get factText =>
+      $composableBuilder(column: $table.factText, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+}
+
+class $$EntityFactsTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $EntityFactsTable,
+          EntityFactRow,
+          $$EntityFactsTableFilterComposer,
+          $$EntityFactsTableOrderingComposer,
+          $$EntityFactsTableAnnotationComposer,
+          $$EntityFactsTableCreateCompanionBuilder,
+          $$EntityFactsTableUpdateCompanionBuilder,
+          (
+            EntityFactRow,
+            BaseReferences<_$AppDatabase, $EntityFactsTable, EntityFactRow>,
+          ),
+          EntityFactRow,
+          PrefetchHooks Function()
+        > {
+  $$EntityFactsTableTableManager(_$AppDatabase db, $EntityFactsTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$EntityFactsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$EntityFactsTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$EntityFactsTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String> characterId = const Value.absent(),
+                Value<String> entityId = const Value.absent(),
+                Value<String> kind = const Value.absent(),
+                Value<String> factText = const Value.absent(),
+                Value<DateTime> createdAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => EntityFactsCompanion(
+                id: id,
+                characterId: characterId,
+                entityId: entityId,
+                kind: kind,
+                factText: factText,
+                createdAt: createdAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                Value<String> characterId = const Value.absent(),
+                required String entityId,
+                Value<String> kind = const Value.absent(),
+                Value<String> factText = const Value.absent(),
+                Value<DateTime> createdAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => EntityFactsCompanion.insert(
+                id: id,
+                characterId: characterId,
+                entityId: entityId,
+                kind: kind,
+                factText: factText,
+                createdAt: createdAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<$EntityFactsTable, EntityFactRow>(table),
+                  BaseReferences<
+                    _$AppDatabase,
+                    $EntityFactsTable,
+                    EntityFactRow
+                  >(db, table, e),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$EntityFactsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $EntityFactsTable,
+      EntityFactRow,
+      $$EntityFactsTableFilterComposer,
+      $$EntityFactsTableOrderingComposer,
+      $$EntityFactsTableAnnotationComposer,
+      $$EntityFactsTableCreateCompanionBuilder,
+      $$EntityFactsTableUpdateCompanionBuilder,
+      (
+        EntityFactRow,
+        BaseReferences<_$AppDatabase, $EntityFactsTable, EntityFactRow>,
+      ),
+      EntityFactRow,
+      PrefetchHooks Function()
+    >;
+typedef $$EntityTurnsTableCreateCompanionBuilder =
+    EntityTurnsCompanion Function({
+      Value<String> characterId,
+      required String entityId,
+      required String messageId,
+      Value<String> snippet,
+      Value<DateTime> at,
+      Value<int> rowid,
+    });
+typedef $$EntityTurnsTableUpdateCompanionBuilder =
+    EntityTurnsCompanion Function({
+      Value<String> characterId,
+      Value<String> entityId,
+      Value<String> messageId,
+      Value<String> snippet,
+      Value<DateTime> at,
+      Value<int> rowid,
+    });
+
+class $$EntityTurnsTableFilterComposer
+    extends Composer<_$AppDatabase, $EntityTurnsTable> {
+  $$EntityTurnsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get characterId => $composableBuilder(
+    column: $table.characterId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get entityId => $composableBuilder(
+    column: $table.entityId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get messageId => $composableBuilder(
+    column: $table.messageId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get snippet => $composableBuilder(
+    column: $table.snippet,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get at => $composableBuilder(
+    column: $table.at,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$EntityTurnsTableOrderingComposer
+    extends Composer<_$AppDatabase, $EntityTurnsTable> {
+  $$EntityTurnsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get characterId => $composableBuilder(
+    column: $table.characterId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get entityId => $composableBuilder(
+    column: $table.entityId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get messageId => $composableBuilder(
+    column: $table.messageId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get snippet => $composableBuilder(
+    column: $table.snippet,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get at => $composableBuilder(
+    column: $table.at,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$EntityTurnsTableAnnotationComposer
+    extends Composer<_$AppDatabase, $EntityTurnsTable> {
+  $$EntityTurnsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get characterId => $composableBuilder(
+    column: $table.characterId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get entityId =>
+      $composableBuilder(column: $table.entityId, builder: (column) => column);
+
+  GeneratedColumn<String> get messageId =>
+      $composableBuilder(column: $table.messageId, builder: (column) => column);
+
+  GeneratedColumn<String> get snippet =>
+      $composableBuilder(column: $table.snippet, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get at =>
+      $composableBuilder(column: $table.at, builder: (column) => column);
+}
+
+class $$EntityTurnsTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $EntityTurnsTable,
+          EntityTurnRow,
+          $$EntityTurnsTableFilterComposer,
+          $$EntityTurnsTableOrderingComposer,
+          $$EntityTurnsTableAnnotationComposer,
+          $$EntityTurnsTableCreateCompanionBuilder,
+          $$EntityTurnsTableUpdateCompanionBuilder,
+          (
+            EntityTurnRow,
+            BaseReferences<_$AppDatabase, $EntityTurnsTable, EntityTurnRow>,
+          ),
+          EntityTurnRow,
+          PrefetchHooks Function()
+        > {
+  $$EntityTurnsTableTableManager(_$AppDatabase db, $EntityTurnsTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$EntityTurnsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$EntityTurnsTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$EntityTurnsTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> characterId = const Value.absent(),
+                Value<String> entityId = const Value.absent(),
+                Value<String> messageId = const Value.absent(),
+                Value<String> snippet = const Value.absent(),
+                Value<DateTime> at = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => EntityTurnsCompanion(
+                characterId: characterId,
+                entityId: entityId,
+                messageId: messageId,
+                snippet: snippet,
+                at: at,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                Value<String> characterId = const Value.absent(),
+                required String entityId,
+                required String messageId,
+                Value<String> snippet = const Value.absent(),
+                Value<DateTime> at = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => EntityTurnsCompanion.insert(
+                characterId: characterId,
+                entityId: entityId,
+                messageId: messageId,
+                snippet: snippet,
+                at: at,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<$EntityTurnsTable, EntityTurnRow>(table),
+                  BaseReferences<
+                    _$AppDatabase,
+                    $EntityTurnsTable,
+                    EntityTurnRow
+                  >(db, table, e),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$EntityTurnsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $EntityTurnsTable,
+      EntityTurnRow,
+      $$EntityTurnsTableFilterComposer,
+      $$EntityTurnsTableOrderingComposer,
+      $$EntityTurnsTableAnnotationComposer,
+      $$EntityTurnsTableCreateCompanionBuilder,
+      $$EntityTurnsTableUpdateCompanionBuilder,
+      (
+        EntityTurnRow,
+        BaseReferences<_$AppDatabase, $EntityTurnsTable, EntityTurnRow>,
+      ),
+      EntityTurnRow,
+      PrefetchHooks Function()
+    >;
+typedef $$BrainWmStateTableCreateCompanionBuilder =
+    BrainWmStateCompanion Function({
+      Value<String> characterId,
+      required String sessionId,
+      Value<String> dataJson,
+      Value<DateTime> updatedAt,
+      Value<int> rowid,
+    });
+typedef $$BrainWmStateTableUpdateCompanionBuilder =
+    BrainWmStateCompanion Function({
+      Value<String> characterId,
+      Value<String> sessionId,
+      Value<String> dataJson,
+      Value<DateTime> updatedAt,
+      Value<int> rowid,
+    });
+
+class $$BrainWmStateTableFilterComposer
+    extends Composer<_$AppDatabase, $BrainWmStateTable> {
+  $$BrainWmStateTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get characterId => $composableBuilder(
+    column: $table.characterId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get sessionId => $composableBuilder(
+    column: $table.sessionId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get dataJson => $composableBuilder(
+    column: $table.dataJson,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$BrainWmStateTableOrderingComposer
+    extends Composer<_$AppDatabase, $BrainWmStateTable> {
+  $$BrainWmStateTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get characterId => $composableBuilder(
+    column: $table.characterId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get sessionId => $composableBuilder(
+    column: $table.sessionId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get dataJson => $composableBuilder(
+    column: $table.dataJson,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$BrainWmStateTableAnnotationComposer
+    extends Composer<_$AppDatabase, $BrainWmStateTable> {
+  $$BrainWmStateTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get characterId => $composableBuilder(
+    column: $table.characterId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get sessionId =>
+      $composableBuilder(column: $table.sessionId, builder: (column) => column);
+
+  GeneratedColumn<String> get dataJson =>
+      $composableBuilder(column: $table.dataJson, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+}
+
+class $$BrainWmStateTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $BrainWmStateTable,
+          BrainWmStateRow,
+          $$BrainWmStateTableFilterComposer,
+          $$BrainWmStateTableOrderingComposer,
+          $$BrainWmStateTableAnnotationComposer,
+          $$BrainWmStateTableCreateCompanionBuilder,
+          $$BrainWmStateTableUpdateCompanionBuilder,
+          (
+            BrainWmStateRow,
+            BaseReferences<_$AppDatabase, $BrainWmStateTable, BrainWmStateRow>,
+          ),
+          BrainWmStateRow,
+          PrefetchHooks Function()
+        > {
+  $$BrainWmStateTableTableManager(_$AppDatabase db, $BrainWmStateTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$BrainWmStateTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$BrainWmStateTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$BrainWmStateTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> characterId = const Value.absent(),
+                Value<String> sessionId = const Value.absent(),
+                Value<String> dataJson = const Value.absent(),
+                Value<DateTime> updatedAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => BrainWmStateCompanion(
+                characterId: characterId,
+                sessionId: sessionId,
+                dataJson: dataJson,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                Value<String> characterId = const Value.absent(),
+                required String sessionId,
+                Value<String> dataJson = const Value.absent(),
+                Value<DateTime> updatedAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => BrainWmStateCompanion.insert(
+                characterId: characterId,
+                sessionId: sessionId,
+                dataJson: dataJson,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<$BrainWmStateTable, BrainWmStateRow>(table),
+                  BaseReferences<
+                    _$AppDatabase,
+                    $BrainWmStateTable,
+                    BrainWmStateRow
+                  >(db, table, e),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$BrainWmStateTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $BrainWmStateTable,
+      BrainWmStateRow,
+      $$BrainWmStateTableFilterComposer,
+      $$BrainWmStateTableOrderingComposer,
+      $$BrainWmStateTableAnnotationComposer,
+      $$BrainWmStateTableCreateCompanionBuilder,
+      $$BrainWmStateTableUpdateCompanionBuilder,
+      (
+        BrainWmStateRow,
+        BaseReferences<_$AppDatabase, $BrainWmStateTable, BrainWmStateRow>,
+      ),
+      BrainWmStateRow,
+      PrefetchHooks Function()
+    >;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -10008,4 +13444,14 @@ class $AppDatabaseManager {
       $$MoodHistoryTableTableManager(_db, _db.moodHistory);
   $$PersonaTraitRowsTableTableManager get personaTraitRows =>
       $$PersonaTraitRowsTableTableManager(_db, _db.personaTraitRows);
+  $$CharacterVersionsTableTableManager get characterVersions =>
+      $$CharacterVersionsTableTableManager(_db, _db.characterVersions);
+  $$EntitiesTableTableManager get entities =>
+      $$EntitiesTableTableManager(_db, _db.entities);
+  $$EntityFactsTableTableManager get entityFacts =>
+      $$EntityFactsTableTableManager(_db, _db.entityFacts);
+  $$EntityTurnsTableTableManager get entityTurns =>
+      $$EntityTurnsTableTableManager(_db, _db.entityTurns);
+  $$BrainWmStateTableTableManager get brainWmState =>
+      $$BrainWmStateTableTableManager(_db, _db.brainWmState);
 }

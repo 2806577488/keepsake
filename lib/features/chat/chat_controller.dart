@@ -32,6 +32,11 @@ import '../../core/api/file_upload.dart';
 import '../../core/brain/brain_service.dart';
 import '../../core/brain/brain_store.dart';
 import '../../core/brain/brain_types.dart';
+import '../../core/brain/brain_character.dart';
+import '../../core/brain/brain_entities.dart';
+import '../../core/brain/brain_entity_extract.dart';
+import '../../core/brain/brain_entities_store.dart';
+import '../../core/brain/brain_profile.dart';
 import '../../core/characters/character_service.dart';
 import '../../core/chat/attachments.dart' as attachments;
 import '../../core/chat/blocks.dart' as blk;
@@ -608,6 +613,9 @@ class ChatController extends Notifier<ChatUiState> {
   // --- 流式状态 ---
   StreamSubscription<ChatEvent>? _sub;
   ChatBackend? _backend;
+
+  /// v0.4.35：每个角色已观察的轮数（决定何时做实体字段抽取；每 3 轮一次）。
+  final Map<String, int> _entityExtractTicks = <String, int>{};
   bool _streaming = false;
   bool _finalizing = false;
   bool _searchRunning = false;
@@ -1340,6 +1348,13 @@ class ChatController extends Notifier<ChatUiState> {
     // 实测缓存命中率只有 18%–34%（2026-11-24，模拟器）。历史那条链是稳定的，
     // 所以把易变内容挂到「最后一轮 user」开头，前面 system + 历史都能命中。
     var systemContent = context.system?.content ?? settings.resolvedSystemPrompt;
+    // v0.4.35：专业规范（用户写的领域规矩）排在全局提示词之后、角色设定之前。
+    // 和角色一样是稳定内容：放 system 前缀，不破坏块前缀缓存。
+    final specialtySection =
+        renderSpecialtySection(settings.specialtyRules);
+    if (specialtySection.isNotEmpty) {
+      systemContent = '$systemContent\n\n$specialtySection';
+    }
     // 旧轮次被裁掉时告诉模型「更早的还在长期记忆里」，避免它以为对话从最近开始。
     // 这里**故意不写轮数**：写「更早的 N 轮」会让 N 一变 system 就变，又是缓存杀手。
     if (context.droppedCount > 0 && !systemContent.contains('已存入长期记忆')) {
@@ -1357,6 +1372,11 @@ class ChatController extends Notifier<ChatUiState> {
       if (characterSection.isNotEmpty) {
         systemContent = '$systemContent\n\n$characterSection';
       }
+      // v0.4.35 角色层：模型写出的「我是谁」（bootstrap 之后才有；稳定内容，放 system）。
+      final definitionSection = characterDefinitionSection(character.definition);
+      if (definitionSection.isNotEmpty) {
+        systemContent = '$systemContent\n\n$definitionSection';
+      }
       final injection = await ref
           .read(brainServiceProvider)
           .buildInjection(
@@ -1372,6 +1392,30 @@ class ChatController extends Notifier<ChatUiState> {
             baseSystemChars: systemContent.length,
           );
       if (!injection.isEmpty) injectionText = injection.text;
+
+      // v0.4.35 实体层：先解析"这一轮在说谁"（点名 → 槽位兜底 → 相关对象），
+      // 再把它放到注入文本**最前面**（与 dsh-brain 的实体优先一致）。
+      if (settings.memoryEnabled) {
+        try {
+          final resolution = await BrainEntityStore(ref.read(databaseProvider))
+              .resolveForTurn(
+                characterId: character.id,
+                sessionId: _sessionId,
+                text: _lastUserTextOf(history),
+              );
+          final entitySection = renderEntitySection(
+            resolution.profiles,
+            related: resolution.related,
+          );
+          if (entitySection.isNotEmpty) {
+            injectionText = injectionText.trim().isEmpty
+                ? entitySection
+                : '$entitySection\n\n${injectionText.trim()}';
+          }
+        } catch (_) {
+          // 实体层不可用不影响对话
+        }
+      }
     } catch (_) {
       // 大脑不可用时不影响对话：用原来的 system prompt。
     }
@@ -1709,6 +1753,55 @@ class ChatController extends Notifier<ChatUiState> {
             userText: userText,
             assistantText: assistantText,
           );
+
+      // v0.4.35 角色层：攒证据，够阈值就让模型写/修一版「我是谁」（不 await）。
+      final definitionStore = CharacterDefinitionStore(ref.read(databaseProvider));
+      await definitionStore.addEvidence(character.id);
+      final backend = _backend;
+
+      // v0.4.35 睡眠期结构化巩固：每 3 轮抽一次「主诉/辨证/处方」字段（低频，省钱）。
+      if (backend != null && settings.memoryEnabled) {
+        final tick = (_entityExtractTicks[character.id] ?? 0) + 1;
+        _entityExtractTicks[character.id] = tick;
+        if (tick % 3 == 0) {
+          final db = ref.read(databaseProvider);
+          unawaited(
+            runEntityExtraction(
+              db: db,
+              backend: backend,
+              characterId: character.id,
+              turns: <ExtractTurn>[
+                ExtractTurn(user: userText, assistant: assistantText),
+              ],
+            ).catchError((_) => 0),
+          );
+        }
+      }
+
+      if (backend != null && await definitionStore.needsRevision(character.id)) {
+        final card = await definitionStore.get(character.id) ?? character;
+        final turns = <CharacterTurn>[
+          (user: userText, assistant: assistantText),
+        ];
+        final db = ref.read(databaseProvider);
+        unawaited(
+          (card.definitionVersion == 0
+                  ? runCharacterBootstrap(
+                      db: db,
+                      backend: backend,
+                      card: card,
+                      turns: turns,
+                    )
+                  : runCharacterRevise(
+                      db: db,
+                      backend: backend,
+                      card: card,
+                      current: card.definition,
+                      turns: turns,
+                    ))
+              .catchError((_) => false),
+        );
+      }
     } catch (_) {
       // 后台整理失败不影响聊天。
     }
