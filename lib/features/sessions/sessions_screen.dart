@@ -41,6 +41,7 @@ import 'package:keepsake/core/skin_tokens.dart'
 import 'package:keepsake/core/theme.dart';
 import 'package:keepsake/core/usage/usage_store.dart';
 import 'package:keepsake/features/chat/chat_screen.dart';
+import 'swipe_reveal_delete.dart';
 import 'package:keepsake/features/sessions/delete_task.dart';
 import 'package:keepsake/features/sessions/sessions_providers.dart';
 import 'package:keepsake/features/settings/settings_screen.dart';
@@ -858,37 +859,24 @@ class _SessionsScreenState extends ConsumerState<SessionsScreen> {
           itemCount: sessions.length,
           // 分割线通栏 1px（README §1 outlineVariant）；行高由 _SessionRow 固定 68。
           separatorBuilder: (_, _) => const Divider(height: 1),
-          itemBuilder: (context, index) =>
-              _buildSessionTile(theme, sessions[index]),
+          itemBuilder: (context, index) => _buildSessionTile(sessions[index]),
         );
       },
     );
   }
 
-  Widget _buildSessionTile(ThemeData theme, Session session) {
-    final skin = KeepsakeSkinColors.of(context);
+  Widget _buildSessionTile(Session session) {
     final pinned = isSessionPinned(session);
     final selected = _selecting && _selectedIds.contains(session.id);
-    return Dismissible(
-      key: ValueKey<String>('session-${session.id}'),
+    // v0.4.43：左滑露出删除，滑开后停住、垃圾桶可直接点（带确认）。
+    return SwipeRevealDelete(
       // 选择态禁用左滑删除，避免误操作。
-      direction: _selecting
-          ? DismissDirection.none
-          : DismissDirection.endToStart,
-      background: Container(
-        color: theme.colorScheme.errorContainer,
-        alignment: Alignment.centerRight,
-        padding: const EdgeInsets.only(right: 24),
-        child: Icon(
-          skin.icon(
-            filled: Icons.delete_outline,
-            outlined: Icons.delete_outline,
-          ),
-          color: theme.colorScheme.onErrorContainer,
-        ),
-      ),
-      confirmDismiss: (_) => _confirmDelete(session),
-      onDismissed: (_) => _deleteSession(session),
+      enabled: !_selecting,
+      onDelete: () async {
+        if (await _confirmDelete(session)) {
+          await _deleteSession(session);
+        }
+      },
       // 行：高 68 / 左右 16 / gap 12 / 头像 34（README §4.1）；
       // 多选态几何完全一致，复选框放在 34 槽位里（§4.6、§5）。
       child: _SessionRow(
