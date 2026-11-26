@@ -37,6 +37,7 @@ import '../../core/brain/brain_entities.dart';
 import '../../core/brain/brain_entity_extract.dart';
 import '../../core/brain/brain_entities_store.dart';
 import '../../core/brain/brain_profile.dart';
+import '../../core/chat/history_guard.dart';
 import '../../core/characters/character_service.dart';
 import '../../core/chat/attachments.dart' as attachments;
 import '../../core/chat/blocks.dart' as blk;
@@ -1434,6 +1435,10 @@ class ChatController extends Notifier<ChatUiState> {
       }
       messages = List<ChatTurn>.unmodifiable(mutable);
     }
+
+    // v0.4.39 修复：空 assistant 被跳过会留下连续 user，账号型传输直接 400
+    // 「an assistant message must follow a user message」。
+    messages = normalizeHistoryAlternation(messages);
 
     return ChatRequest(
       provider: provider,
