@@ -45,6 +45,7 @@ import 'package:keepsake/features/settings/export_tile.dart';
 import 'package:keepsake/features/sessions/delete_task.dart';
 import 'package:keepsake/features/settings/brain_layers_screen.dart';
 import 'package:keepsake/features/settings/data_maintenance_section.dart';
+import 'package:keepsake/features/settings/diagnostics_tile.dart';
 import 'package:keepsake/features/settings/import_tile.dart';
 import 'package:keepsake/features/settings/characters_screen.dart';
 import 'package:keepsake/features/settings/provider_section.dart';
@@ -179,6 +180,75 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     if (result == null || !mounted) return;
     await ref.read(settingsProvider.notifier).setSpecialtyRules(result);
     _toast(result.isEmpty ? '已关闭专业规范' : '专业规范已保存');
+  }
+
+  // -------------------------------------------------------------------------
+  // 实体字段抽取（v0.4.39：轮数可改、0 = 关闭）
+  // -------------------------------------------------------------------------
+
+  Future<void> _entityExtract() async {
+    final settings = ref.read(settingsProvider);
+    final controller = TextEditingController(
+      text: '${settings.entityExtractEveryRounds}',
+    );
+    final result = await showDialog<int>(
+      context: context,
+      builder: (dialogContext) {
+        final s = KeepsakeSkinColors.of(dialogContext);
+        return AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: s.rSheet),
+          title: const Text('实体字段抽取'),
+          content: SizedBox(
+            width: 420,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '每 N 轮让模型抽一次「主诉 / 辨证 / 处方」这类字段。'
+                  '填 0 关闭（只保留规则抽取，不花 token）。',
+                  style: Theme.of(dialogContext).textTheme.bodySmall,
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: controller,
+                  autofocus: true,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                    labelText: '轮数（0 = 关闭）',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              style: TextButton.styleFrom(
+                minimumSize: const Size(64, KeepsakeTheme.sheetButtonHeight),
+              ),
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(
+                minimumSize: const Size(64, KeepsakeTheme.sheetButtonHeight),
+              ),
+              onPressed: () => Navigator.of(dialogContext).pop(
+                int.tryParse(controller.text.trim()) ??
+                    settings.entityExtractEveryRounds,
+              ),
+              child: const Text('保存'),
+            ),
+          ],
+        );
+      },
+    );
+    if (result == null || !mounted) return;
+    await ref
+        .read(settingsProvider.notifier)
+        .setEntityExtractEveryRounds(result);
+    _toast(result <= 0 ? '已关闭实体字段抽取' : '每 $result 轮抽取一次');
   }
 
   // -------------------------------------------------------------------------
@@ -609,6 +679,17 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               ),
             ),
             ListTile(
+              leading: const Icon(Icons.auto_awesome_outlined),
+              title: const Text('实体字段抽取'),
+              subtitle: Text(
+                settings.entityExtractEveryRounds <= 0
+                    ? '已关闭（不调用模型，不花 token）'
+                    : '每 ${settings.entityExtractEveryRounds} 轮让模型抽一次'
+                        '（主诉/辨证/处方）',
+              ),
+              onTap: _entityExtract,
+            ),
+            ListTile(
               leading: Icon(
                 s.icon(
                   filled: Icons.schedule,
@@ -746,6 +827,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             ),
             const ImportHistoryTile(),
             const ExportBackupTile(),
+            const DiagnosticsTile(),
 
             // 「数据维护」（v3.3 §2.3）：批量修复入口只在这里。区块内部自带
             // 「数据维护」分区标题，没有需要修的东西时**连标题一起消失**。

@@ -1761,9 +1761,11 @@ class ChatController extends Notifier<ChatUiState> {
 
       // v0.4.35 睡眠期结构化巩固：每 3 轮抽一次「主诉/辨证/处方」字段（低频，省钱）。
       if (backend != null && settings.memoryEnabled) {
+        // v0.4.39：轮数可配（0 = 关闭），不再写死每 3 轮。
+        final every = settings.entityExtractEveryRounds;
         final tick = (_entityExtractTicks[character.id] ?? 0) + 1;
         _entityExtractTicks[character.id] = tick;
-        if (tick % 3 == 0) {
+        if (every > 0 && tick % every == 0) {
           final db = ref.read(databaseProvider);
           unawaited(
             runEntityExtraction(
