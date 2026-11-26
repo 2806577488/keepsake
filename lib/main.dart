@@ -17,9 +17,11 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'core/incoming/open_with.dart';
 import 'core/providers.dart';
 import 'core/skin_tokens.dart';
 import 'core/theme.dart';
+import 'features/chat/chat_screen.dart';
 import 'features/sessions/sessions_screen.dart';
 
 Future<void> main() async {
@@ -86,6 +88,7 @@ class KeepsakeApp extends ConsumerWidget {
     return MaterialApp(
       title: 'Keepsake（留声）',
       debugShowCheckedModeBanner: false,
+      navigatorKey: keepsakeNavigatorKey,
       // v0.4.42：应用内默认中文（选择菜单、日期控件等系统级文案都跟着变）。
       locale: const Locale('zh', 'CN'),
       supportedLocales: const <Locale>[Locale('zh', 'CN'), Locale('en')],
@@ -103,7 +106,64 @@ class KeepsakeApp extends ConsumerWidget {
           child: child ?? const SizedBox.shrink(),
         );
       },
-      home: const SessionsScreen(),
+      home: const OpenWithHost(child: SessionsScreen()),
     );
   }
+}
+
+/// 全局导航 key（「用其他应用打开」收到文件后要 push 聊天页）。
+final GlobalKey<NavigatorState> keepsakeNavigatorKey =
+    GlobalKey<NavigatorState>();
+
+/// 「用其他应用打开」宿主：冷启动/前台收到文件后建新会话并附带该文件。
+class OpenWithHost extends ConsumerStatefulWidget {
+  const OpenWithHost({super.key, required this.child});
+
+  final Widget child;
+
+  @override
+  ConsumerState<OpenWithHost> createState() => _OpenWithHostState();
+}
+
+class _OpenWithHostState extends ConsumerState<OpenWithHost> {
+  bool _busy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    listenOpenWith(_handleFile);
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      final pending = await takePendingOpen();
+      if (pending != null) await _handleFile(pending);
+    });
+  }
+
+  Future<void> _handleFile(OpenWithFile file) async {
+    if (_busy) return;
+    _busy = true;
+    try {
+      final db = ref.read(databaseProvider);
+      final settings = ref.read(settingsProvider);
+      final id = await db.createSession(searchEnabled: settings.searchEnabled);
+      if (!mounted) return;
+      final navigator = keepsakeNavigatorKey.currentState;
+      if (navigator == null) return;
+      await navigator.push<void>(
+        MaterialPageRoute<void>(
+          builder: (_) => ChatScreen(
+            sessionId: id,
+            initialTitle: '未命名会话',
+            initialAttachment: file,
+          ),
+        ),
+      );
+    } catch (error) {
+      debugPrint('打开文件失败：$error');
+    } finally {
+      _busy = false;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
 }

@@ -32,6 +32,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/chat/attachments.dart' show AttachmentRules;
+import '../../core/incoming/open_with.dart';
 import '../../core/chat/image_util.dart' show imageSizeOf;
 import '../../core/providers.dart';
 // 为什么：chip 的图标 15 / 字号 12 只在 token 层有常量，页面里写死会和三套皮肤脱节。
@@ -59,10 +60,18 @@ import 'widgets/markdown_view.dart';
 /// ));
 /// ```
 class ChatScreen extends ConsumerStatefulWidget {
-  const ChatScreen({super.key, required this.sessionId, this.initialTitle});
+  const ChatScreen({
+    super.key,
+    required this.sessionId,
+    this.initialTitle,
+    this.initialAttachment,
+  });
 
   /// 会话 id（由会话列表先 `createSession` 得到）。
   final String sessionId;
+
+  /// 「用其他应用打开」带进来的文件（v0.4.44）：进页面就挂成待发送附件。
+  final OpenWithFile? initialAttachment;
 
   /// 首帧占位标题（DB 读出来后以 DB 为准）。
   final String? initialTitle;
@@ -144,6 +153,23 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   void initState() {
     super.initState();
     _input.addListener(_onInputChanged);
+    final incoming = widget.initialAttachment;
+    if (incoming != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        unawaited(_attachIncoming(incoming));
+      });
+    }
+  }
+
+  /// 把「用其他应用打开」带进来的文件挂成待发送附件。
+  Future<void> _attachIncoming(OpenWithFile file) async {
+    final error = await _controller.addAttachment(
+      file.path,
+      fileName: file.name,
+      mime: file.mime,
+    );
+    if (!mounted) return;
+    _toast(error ?? '已附带文件：${file.name}，输入问题后发送');
   }
 
   @override

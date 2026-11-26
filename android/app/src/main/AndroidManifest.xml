@@ -113,13 +113,17 @@
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
-            <!-- v0.4.42：出现在「用其他应用打开」列表里（文本文件）。
-                 收到 ACTION_VIEW 后由 MainActivity 读取内容并复制到剪贴板。 -->
+            <!-- v0.4.42：出现在「用其他应用打开」列表里；v0.4.44 起支持文档。 -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW"/>
                 <category android:name="android.intent.category.DEFAULT"/>
                 <data android:mimeType="text/plain"/>
                 <data android:mimeType="text/markdown"/>
+                <data android:mimeType="application/pdf"/>
+                <data android:mimeType="application/msword"/>
+                <data android:mimeType="application/vnd.openxmlformats-officedocument.wordprocessingml.document"/>
+                <data android:mimeType="application/vnd.ms-powerpoint"/>
+                <data android:mimeType="application/vnd.openxmlformats-officedocument.presentationml.presentation"/>
             </intent-filter>
         </activity>
         <!-- 应用内更新：把下载到 files/updates（或 cache）的 APK 以 content:// 交给系统安装器。
