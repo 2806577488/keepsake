@@ -8,6 +8,7 @@ import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.IOException
 import java.io.RandomAccessFile
+import java.nio.ByteBuffer
 import java.security.MessageDigest
 import java.util.zip.Inflater
 import java.util.zip.InflaterInputStream
@@ -67,6 +68,9 @@ internal object BsPatch {
 
     /** 读写块大小：64KB，兼顾 32 位机的堆与 IO 效率。 */
     private const val BLOCK = 64 * 1024
+
+    /** 算哈希时的读块大小：1MB 的 direct buffer，减少 read syscall（见 [sha256]）。 */
+    private const val HASH_BLOCK = 1024 * 1024
 
     /** 进度上报粒度：每 1MB 回调一次，避免刷爆 MethodChannel。 */
     private const val PROGRESS_STEP = 1024L * 1024L
@@ -241,16 +245,26 @@ internal object BsPatch {
         return actual
     }
 
-    /** 流式计算文件 sha256（小写十六进制）。 */
+    /**
+     * 流式计算文件 sha256（小写十六进制）。
+     *
+     * 为什么单独用一个 1MB 的 direct buffer 而不是共用 64KB 的 [BLOCK]：
+     * 32MB 的 APK 按 64KB 读是 512 次 read，在 FUSE / emmc 上几乎命中不了
+     * readahead；换成 1MB + FileChannel.read(ByteBuffer) 只要 32 次 syscall，
+     * 校验阶段（用户就盯着「正在校验」这一行）能省下几百毫秒。
+     * 哈希本身走的是 ARMv8 的 SHA256 指令，不是瓶颈；瓶颈在读盘次数。
+     */
     fun sha256(file: File): String {
         if (!file.isFile) throw PatchException("文件不存在：${file.path}")
         val digest = MessageDigest.getInstance("SHA-256")
-        val buf = ByteArray(BLOCK)
-        FileInputStream(file).use { input ->
+        val buffer = ByteBuffer.allocateDirect(HASH_BLOCK)
+        FileInputStream(file).channel.use { channel ->
             while (true) {
-                val read = input.read(buf)
+                buffer.clear()
+                val read = channel.read(buffer)
                 if (read <= 0) break
-                digest.update(buf, 0, read)
+                buffer.flip()
+                digest.update(buffer)
             }
         }
         return hex(digest.digest())

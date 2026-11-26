@@ -24,6 +24,10 @@ android/keystore.jks
 .DS_Store
 Thumbs.db
 
+# Python（tool/make_icon.py 等生成脚本）
+__pycache__/
+*.pyc
+
 # Local logs / scratch
 *.log
 .dsh-analyze-codeblock.log

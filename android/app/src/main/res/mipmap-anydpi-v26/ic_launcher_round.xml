@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 自适应图标（Android 8.0+）：背景是纯 XML 渐变（省掉一张位图），前景是
+     108dp 画布里居中、占 52% 的声纹气泡（安全区内不会被圆形遮罩切掉），
+     monochrome 供 Android 13+ 主题图标（系统按 alpha 染色）。 -->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@drawable/ic_launcher_background"/>
+    <foreground android:drawable="@mipmap/ic_launcher_foreground"/>
+    <monochrome android:drawable="@mipmap/ic_launcher_monochrome"/>
+</adaptive-icon>
