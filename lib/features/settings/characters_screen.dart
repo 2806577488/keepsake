@@ -8,8 +8,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:keepsake/core/characters/character_service.dart';
-import 'package:keepsake/core/db/database.dart';
 import 'package:keepsake/core/providers.dart';
+import 'package:keepsake/core/theme.dart';
 import '../../core/ui/toast.dart';
 
 /// 设置 → 角色卡。
@@ -186,78 +186,11 @@ class _CharactersScreenState extends ConsumerState<CharactersScreen> {
   }
 
   /// 返回编辑后的值（新建时无 card）。取消返回 null。
-  Future<_CardDraft?> _editDialog({CharacterRow? card}) async {
-    final nameController = TextEditingController(text: card?.name ?? '');
-    final descController = TextEditingController(text: card?.description ?? '');
-    final promptController = TextEditingController(text: card?.prompt ?? '');
-    final emojiController = TextEditingController(text: card?.emoji ?? '');
-    final result = await showDialog<_CardDraft>(
+  Future<_CardDraft?> _editDialog({CharacterRow? card}) {
+    return showDialog<_CardDraft>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: Text(card == null ? '新建角色卡' : '编辑角色卡'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: nameController,
-                decoration: const InputDecoration(
-                  labelText: '名字',
-                  hintText: '例如：一起打游戏的她',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: emojiController,
-                decoration: const InputDecoration(
-                  labelText: '头像 emoji',
-                  hintText: '🤖',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: descController,
-                maxLines: 2,
-                decoration: const InputDecoration(
-                  labelText: '简介',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: promptController,
-                maxLines: 5,
-                decoration: const InputDecoration(
-                  labelText: '人设 prompt（留空自动生成）',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(null),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(dialogContext).pop(
-              _CardDraft(
-                name: nameController.text,
-                description: descController.text,
-                prompt: promptController.text,
-                emoji: emojiController.text,
-              ),
-            ),
-            child: const Text('保存'),
-          ),
-        ],
-      ),
+      builder: (dialogContext) => _CharacterCardDialog(card: card),
     );
-    // 退场动画期间不 dispose（否则真机红屏）；交给 GC。
-    return result;
   }
 
   @override
@@ -390,4 +323,179 @@ class _CardDraft {
   final String description;
   final String prompt;
   final String emoji;
+}
+
+/// 角色卡编辑弹窗（v0.4.33 重做）。
+///
+/// 旧版把四个默认样式的 `TextField` 直接堆进 `AlertDialog`：主题里的胶囊圆角
+/// （`rField = 999`）套到多行输入框上，label 浮到框外，简介空框上百 dp —— 一张卡
+/// 看起来像"四个灰药丸 + 一屏空白"。
+///
+/// 现在按设计系统的表单规格重做：
+/// - 字段用**小圆角**（`rCard`）+ 1px 描边 + 框内小标题，不再用 999 胶囊；
+/// - 高度有节奏：单行 / emoji 收窄 / 简介 3 行 / 人设 4–6 行；
+/// - 名字为空时「保存」不可点；名字像会话标题时给一句提示（不偷偷改名）；
+/// - 「人设备注」明确写清它只存这张卡、不替代全局 system prompt —— 当前版本它确实
+///   不参与对话注入，不能再让用户以为填了就会生效。
+class _CharacterCardDialog extends StatefulWidget {
+  const _CharacterCardDialog({this.card});
+
+  final CharacterRow? card;
+
+  @override
+  State<_CharacterCardDialog> createState() => _CharacterCardDialogState();
+}
+
+class _CharacterCardDialogState extends State<_CharacterCardDialog> {
+  late final TextEditingController _nameController;
+  late final TextEditingController _emojiController;
+  late final TextEditingController _descriptionController;
+  late final TextEditingController _promptController;
+
+  @override
+  void initState() {
+    super.initState();
+    _nameController = TextEditingController(text: widget.card?.name ?? '');
+    _emojiController = TextEditingController(
+      text: (widget.card?.emoji ?? '').trim().isEmpty ? kDefaultCharacterEmoji : widget.card!.emoji,
+    );
+    _descriptionController = TextEditingController(text: widget.card?.description ?? '');
+    _promptController = TextEditingController(text: widget.card?.prompt ?? '');
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _emojiController.dispose();
+    _descriptionController.dispose();
+    _promptController.dispose();
+    super.dispose();
+  }
+
+  bool get _canSave => _nameController.text.trim().isNotEmpty;
+
+  InputDecoration _decoration(KeepsakeSkinColors s, {String? hint}) => InputDecoration(
+    hintText: hint,
+    filled: true,
+    fillColor: s.c.highest,
+    isDense: true,
+    counterText: '',
+    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+    border: OutlineInputBorder(borderRadius: s.rCard, borderSide: BorderSide.none),
+    enabledBorder: OutlineInputBorder(
+      borderRadius: s.rCard,
+      borderSide: BorderSide(color: s.c.ov, width: 1),
+    ),
+    focusedBorder: OutlineInputBorder(
+      borderRadius: s.rCard,
+      borderSide: BorderSide(color: s.c.selBar, width: 1.2),
+    ),
+  );
+
+  Widget _label(String text, ThemeData theme, KeepsakeSkinColors s) => Padding(
+    padding: const EdgeInsets.only(bottom: 6),
+    child: Text(text, style: theme.textTheme.bodySmall?.copyWith(color: s.c.onV)),
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final s = KeepsakeSkinColors.of(context);
+    final bool fromSessionTitle =
+        widget.card != null && isGenericCardTitle(widget.card!.name);
+    return AlertDialog(
+      shape: RoundedRectangleBorder(borderRadius: s.rSheet),
+      title: Text(widget.card == null ? '新建角色卡' : '编辑角色卡'),
+      content: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxWidth: 420,
+          maxHeight: MediaQuery.sizeOf(context).height * 0.6,
+        ),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _label('名字', theme, s),
+              TextField(
+                controller: _nameController,
+                maxLength: 24,
+                textInputAction: TextInputAction.next,
+                decoration: _decoration(s, hint: '例如：一起打游戏的她'),
+                onChanged: (_) => setState(() {}),
+              ),
+              if (fromSessionTitle)
+                Padding(
+                  padding: const EdgeInsets.only(top: 2),
+                  child: Text(
+                    '这个名字像是从会话标题来的，建议改成人物名。',
+                    style: theme.textTheme.bodySmall?.copyWith(color: s.c.onV),
+                  ),
+                ),
+              const SizedBox(height: 14),
+              _label('头像 emoji', theme, s),
+              SizedBox(
+                width: 140,
+                child: TextField(
+                  controller: _emojiController,
+                  maxLength: 4,
+                  decoration: _decoration(s, hint: '🤖'),
+                ),
+              ),
+              const SizedBox(height: 14),
+              _label('简介', theme, s),
+              TextField(
+                controller: _descriptionController,
+                minLines: 3,
+                maxLines: 3,
+                maxLength: 120,
+                decoration: _decoration(s, hint: '这个人是谁，一两句就够'),
+              ),
+              const SizedBox(height: 14),
+              _label('人设备注（可选）', theme, s),
+              TextField(
+                controller: _promptController,
+                minLines: 4,
+                maxLines: 6,
+                maxLength: 2000,
+                decoration: _decoration(s, hint: '留空即可'),
+              ),
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Text(
+                  '只保存在这张卡上；当前版本不会替代「设置 › AI 平台」里的全局 system prompt。',
+                  style: theme.textTheme.bodySmall?.copyWith(color: s.c.onV),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          style: TextButton.styleFrom(
+            minimumSize: const Size(64, KeepsakeTheme.sheetButtonHeight),
+          ),
+          onPressed: () => Navigator.of(context).pop(null),
+          child: const Text('取消'),
+        ),
+        FilledButton(
+          style: FilledButton.styleFrom(
+            minimumSize: const Size(64, KeepsakeTheme.sheetButtonHeight),
+          ),
+          onPressed: _canSave
+              ? () => Navigator.of(context).pop(
+                  _CardDraft(
+                    name: _nameController.text.trim(),
+                    description: _descriptionController.text.trim(),
+                    prompt: _promptController.text.trim(),
+                    emoji: _emojiController.text.trim(),
+                  ),
+                )
+              : null,
+          child: const Text('保存'),
+        ),
+      ],
+    );
+  }
 }

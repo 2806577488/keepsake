@@ -46,9 +46,55 @@ String defaultCharacterPrompt(String name, {List<String> topicTerms = const <Str
 }
 
 /// 会话标题 → 角色名。
-String characterNameFor(String? sessionTitle) {
-  final title = (sessionTitle ?? '').trim();
-  return title.isEmpty ? kDefaultCharacterName : title;
+///
+/// v0.4.33 起**不再直接把标题当人名**：标题往往是一句话（「妈的现在的中医熟地24g
+/// 都开出来了」），拿它当角色名会让整个角色卡列表变成句子墙。
+/// 规则：清洗 → 像名字才用（≤12 字、不是问句/陈述句、不是占位词）→ 否则退话题词 →
+/// 再否则用「未命名角色」。宁可用占位名，也不要造一个假人名。
+String characterNameFor(String? raw, {List<String> topicTerms = const <String>[]}) {
+  final cleaned = _cleanRawName(raw);
+  if (cleaned.isNotEmpty && _looksLikeName(cleaned)) return cleaned;
+  final terms = <String>[
+    for (final term in topicTerms)
+      if (term.trim().length >= 2) term.trim(),
+  ];
+  if (terms.isNotEmpty) return terms.take(2).join(' · ');
+  return kDefaultCharacterName;
+}
+
+/// 用户**手动输入**的名字：只做最小清洗（不清空、不改成占位名），最多 24 字。
+String sanitizeManualName(String? raw) {
+  final cleaned = _cleanRawName(raw);
+  if (cleaned.isEmpty) return kDefaultCharacterName;
+  return cleaned.length <= 24 ? cleaned : '${cleaned.substring(0, 23)}…';
+}
+
+/// 去掉首尾空白/引号/句末标点，折叠内部空白。
+String _cleanRawName(String? raw) {
+  var value = (raw ?? '').trim();
+  // 包裹的引号/书名号
+  value = value.replaceAll(RegExp(r'^[「『“"《(（\s]+|[」』”"》）)\s]+$'), '');
+  // 句末标点
+  value = value.replaceAll(RegExp(r'[。．\.！!？?，,；;：:、…~～]+$'), '');
+  // 折叠空白 / 去掉零宽
+  value = value
+      .replaceAll(RegExp('[\u200b-\u200d\ufeff]'), '')
+      .replaceAll(RegExp(r'\s+'), ' ');
+  return value.trim();
+}
+
+/// 看起来像不像一个「名字」。
+bool _looksLikeName(String value) {
+  if (value.isEmpty) return false;
+  if (value.length > 12) return false;
+  if (isGenericCardTitle(value)) return false;
+  // 陈述/疑问句：含句内标点，或以疑问尾字结尾，或含疑问词
+  if (RegExp(r'[。！？!?，,；;：:]').hasMatch(value)) return false;
+  if (RegExp(r'[吗呢吧么]$').hasMatch(value)) return false;
+  if (RegExp(r'(怎么|为什么|哪个|哪些|多少|是不是|能不能|要不要)').hasMatch(value)) {
+    return false;
+  }
+  return true;
 }
 
 /// 这些标题不是「角色名」，只是会话状态/占位（导入时很常见）。
@@ -74,7 +120,9 @@ bool isGenericCardTitle(String? name) {
   if (RegExp(r'^\d+$').hasMatch(title)) return true;
   if (RegExp(r'^(未命名|新对话|会话|对话|导入的)').hasMatch(title)) return true;
   if (RegExp(r'(已开启|已关闭|已启用|已停用)').hasMatch(title)) return true;
-  if (title.length > 24) return true;
+  // v0.4.33：24 太宽了——把「一句话」放进角色卡列表就是这么来的。名字超过 12 字
+  // 基本可以判定不是人名（中文姓名 2–4 字，网名也很少超过 10 个汉字）。
+  if (title.length > 12) return true;
   return false;
 }
 
@@ -126,6 +174,14 @@ class CharacterService {
   // -------------------------------------------------------------------------
 
   /// 取会话的角色；没有就**按需建默认卡**并绑上。
+  ///
+  /// v0.4.33 止血：普通会话**不再「一个会话一张角色卡」**。
+  ///
+  /// 老实现拿会话标题当角色名、套上人设模板，于是"随便问个问题"都会长出一张
+  /// 「妈的现在的中医熟地24g都开出来了」这种角色卡。现在：
+  /// - 显式给了 [name]（导入聚类 / 手动指定）→ 建真角色卡，名字过清洗；
+  /// - 没给名字（普通对话）→ 复用**同一张**默认记忆域，名字固定「未命名角色」、
+  ///   不写人设文本。它只当记忆边界用，不再伪装成"角色"。
   Future<CharacterRow> ensureForSession(
     String sessionId, {
     String source = kCharacterSourceDefault,
@@ -138,20 +194,47 @@ class CharacterService {
       final existing = await db.characterById(existingId);
       if (existing != null) return existing;
     }
-    final cardName = (name ?? '').trim().isNotEmpty
-        ? name!.trim()
-        : characterNameFor(session?.title);
-    final card = await db.createCharacter(
-      name: cardName,
-      prompt: defaultCharacterPrompt(cardName),
-      description: (description ?? '').trim().isEmpty ? null : description!.trim(),
-      emoji: kDefaultCharacterEmoji,
-      source: source,
-    );
+    final explicitName = (name ?? '').trim();
+    if (explicitName.isNotEmpty) {
+      final cardName = characterNameFor(explicitName);
+      final card = await db.createCharacter(
+        name: cardName,
+        prompt: defaultCharacterPrompt(cardName),
+        description: (description ?? '').trim().isEmpty ? null : description!.trim(),
+        emoji: kDefaultCharacterEmoji,
+        source: source,
+      );
+      if (session != null) {
+        await db.setSessionCharacter(sessionId, card.id);
+      }
+      return card;
+    }
+    final card = await _sharedDefaultCard();
     if (session != null) {
       await db.setSessionCharacter(sessionId, card.id);
     }
     return card;
+  }
+
+  /// 普通对话共用的默认记忆域（懒创建，一次就好）。
+  ///
+  /// 判据：`source == default` 且没有人设文本 —— 老版本按会话建的那些卡都带人设模板，
+  /// 不会被误认成这一张。
+  Future<CharacterRow> _sharedDefaultCard() async {
+    final cards = await db.allCharacters();
+    for (final card in cards) {
+      if (card.source == kCharacterSourceDefault && card.prompt.trim().isEmpty) {
+        return card;
+      }
+    }
+    return db.createCharacter(
+      name: kDefaultCharacterName,
+      // 默认记忆域不写人设：一旦写了模板，它就又变成"角色"了（正是要止血的东西）。
+      prompt: '',
+      description: null,
+      emoji: kDefaultCharacterEmoji,
+      source: kCharacterSourceDefault,
+    );
   }
 
   Future<List<CharacterSummary>> list() async {
@@ -170,7 +253,7 @@ class CharacterService {
     String? description,
     String? emoji,
   }) async {
-    final cardName = characterNameFor(name);
+    final cardName = sanitizeManualName(name);
     return db.createCharacter(
       name: cardName,
       prompt: (prompt ?? '').trim().isEmpty
@@ -202,7 +285,10 @@ class CharacterService {
     final id = (session?.characterId ?? '').trim();
     if (id.isEmpty) return null;
     final card = await db.characterById(id);
-    return card == null ? null : '${card.emoji.trim().isEmpty ? kDefaultCharacterEmoji : card.emoji} ${characterNameFor(card.name)}';
+    // 展示用：存了什么就显示什么（v0.4.33 之前建的老卡可能是长句子，
+    // 这里不再偷偷改名——改名是用户的事）。
+    final name = card == null ? '' : (card.name.trim().isEmpty ? kDefaultCharacterName : card.name.trim());
+    return card == null ? null : '${card.emoji.trim().isEmpty ? kDefaultCharacterEmoji : card.emoji} $name';
   }
 
   Future<String?> nameOfSession(String sessionId) async {
@@ -210,7 +296,8 @@ class CharacterService {
     final id = (session?.characterId ?? '').trim();
     if (id.isEmpty) return null;
     final card = await db.characterById(id);
-    return card == null ? null : characterNameFor(card.name);
+    if (card == null) return null;
+    return card.name.trim().isEmpty ? kDefaultCharacterName : card.name.trim();
   }
 
   /// 把会话移到指定角色（设置页「把某会话移到另一张卡」）。
