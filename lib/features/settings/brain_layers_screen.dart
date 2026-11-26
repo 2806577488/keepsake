@@ -71,6 +71,13 @@ class _BrainLayersScreenState extends ConsumerState<BrainLayersScreen> {
     }
   }
 
+  /// 弹层内容宽度：按屏幕收窄（360dp 手机上固定 460 会横向溢出）。
+  double _dialogWidth(BuildContext context, {double max = 460}) {
+    final available = MediaQuery.sizeOf(context).width - 56;
+    if (available < 240) return 240;
+    return available > max ? max : available;
+  }
+
   Future<void> _showEntity(EntityRow entity) async {
     final store = BrainEntityStore(_db);
     EntityProfileView? profile;
@@ -92,7 +99,7 @@ class _BrainLayersScreenState extends ConsumerState<BrainLayersScreen> {
         shape: RoundedRectangleBorder(borderRadius: s.rSheet),
         title: Text('${entity.name}（${kindLabelOf(entity.kind)}）'),
         content: SizedBox(
-          width: 460,
+          width: _dialogWidth(dialogContext),
           child: ConstrainedBox(
             constraints: BoxConstraints(
               maxHeight: MediaQuery.sizeOf(dialogContext).height * 0.6,
@@ -148,7 +155,7 @@ class _BrainLayersScreenState extends ConsumerState<BrainLayersScreen> {
         shape: RoundedRectangleBorder(borderRadius: s.rSheet),
         title: const Text('版本历史'),
         content: SizedBox(
-          width: 460,
+          width: _dialogWidth(dialogContext),
           child: ConstrainedBox(
             constraints: BoxConstraints(
               maxHeight: MediaQuery.sizeOf(dialogContext).height * 0.6,
