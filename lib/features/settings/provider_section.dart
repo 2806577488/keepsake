@@ -15,6 +15,7 @@
 library;
 
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:keepsake/core/providers.dart';
@@ -527,7 +528,28 @@ class _ProviderEditSheetState extends ConsumerState<ProviderEditSheet> {
                 ),
               ),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 4),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                style: TextButton.styleFrom(
+                  padding: EdgeInsets.zero,
+                  minimumSize: const Size(64, 32),
+                ),
+                icon: const Icon(Icons.open_in_new, size: 18),
+                label: const Text('还没有 Key？去 DeepSeek 开放平台获取'),
+                onPressed: () async {
+                  final ok = await launchUrl(
+                    Uri.parse('https://platform.deepseek.com/api_keys'),
+                    mode: LaunchMode.externalApplication,
+                  );
+                  if (!ok) {
+                    _toast('打不开浏览器，请手动访问 platform.deepseek.com/api_keys');
+                  }
+                },
+              ),
+            ),
+            const SizedBox(height: 8),
             TextField(
               controller: _model,
               textInputAction: TextInputAction.done,

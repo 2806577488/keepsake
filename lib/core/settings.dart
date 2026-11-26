@@ -95,6 +95,7 @@ class Settings {
   const Settings({
     this.systemPrompt = '',
     this.specialtyRules = '',
+    this.entityExtractEveryRounds = 3,
     this.contextKeepRounds = kDefaultContextKeepRounds,
     this.contextWindowTokens = kDefaultContextWindowTokens,
     this.providerId = '',
@@ -120,6 +121,10 @@ class Settings {
   /// 专业规范（v0.4.35，移植自 dsh-brain 的规范层）：用户自己写的领域规矩，
   /// 渲染成 `【专业规范】` 段追加在 [resolvedSystemPrompt] 之后。空串 = 不注入。
   final String specialtyRules;
+
+  /// 实体字段抽取的轮数（v0.4.39）：每 N 轮让模型抽一次「主诉/辨证/处方」。
+  /// `<= 0` 表示关闭（不调用模型，只保留规则抽取）。
+  final int entityExtractEveryRounds;
 
   /// 上下文预算：保留最近 N 轮；`<= 0` 表示「不限制（全部历史）」。
   final int contextKeepRounds;
@@ -186,6 +191,7 @@ class Settings {
   Settings copyWith({
     String? systemPrompt,
     String? specialtyRules,
+    int? entityExtractEveryRounds,
     int? contextKeepRounds,
     int? contextWindowTokens,
     String? providerId,
@@ -205,6 +211,8 @@ class Settings {
     return Settings(
       systemPrompt: systemPrompt ?? this.systemPrompt,
       specialtyRules: specialtyRules ?? this.specialtyRules,
+      entityExtractEveryRounds:
+          entityExtractEveryRounds ?? this.entityExtractEveryRounds,
       contextKeepRounds: contextKeepRounds ?? this.contextKeepRounds,
       contextWindowTokens: contextWindowTokens ?? this.contextWindowTokens,
       providerId: providerId ?? this.providerId,
@@ -227,6 +235,7 @@ class Settings {
   Map<String, Object?> toJson() => <String, Object?>{
     'system_prompt': systemPrompt,
     'specialty_rules': specialtyRules,
+    'entity_extract_every_rounds': entityExtractEveryRounds,
     'context_keep_rounds': contextKeepRounds,
     'context_window_tokens': contextWindowTokens,
     'provider_id': providerId,
@@ -249,6 +258,9 @@ class Settings {
     return Settings(
       systemPrompt: _str(json, 'system_prompt', 'systemPrompt') ?? '',
       specialtyRules: _str(json, 'specialty_rules', 'specialtyRules') ?? '',
+      entityExtractEveryRounds:
+          _int(json, 'entity_extract_every_rounds', 'entityExtractEveryRounds') ??
+          3,
       contextKeepRounds:
           _int(json, 'context_keep_rounds', 'contextKeepRounds') ??
           kDefaultContextKeepRounds,
@@ -287,6 +299,7 @@ class Settings {
       other is Settings &&
       other.systemPrompt == systemPrompt &&
       other.specialtyRules == specialtyRules &&
+      other.entityExtractEveryRounds == entityExtractEveryRounds &&
       other.contextKeepRounds == contextKeepRounds &&
       other.contextWindowTokens == contextWindowTokens &&
       other.providerId == providerId &&
@@ -307,6 +320,7 @@ class Settings {
   int get hashCode => Object.hash(
     systemPrompt,
     specialtyRules,
+    entityExtractEveryRounds,
     contextKeepRounds,
     contextWindowTokens,
     providerId,
@@ -395,6 +409,7 @@ class SettingsStore extends ChangeNotifier {
   Future<void> patch({
     String? systemPrompt,
     String? specialtyRules,
+    int? entityExtractEveryRounds,
     int? contextKeepRounds,
     int? contextWindowTokens,
     String? providerId,
@@ -414,6 +429,7 @@ class SettingsStore extends ChangeNotifier {
     _value.copyWith(
       systemPrompt: systemPrompt,
       specialtyRules: specialtyRules,
+      entityExtractEveryRounds: entityExtractEveryRounds,
       contextKeepRounds: contextKeepRounds,
       contextWindowTokens: contextWindowTokens,
       providerId: providerId,
@@ -477,6 +493,10 @@ class SettingsController extends Notifier<Settings> {
   /// 专业规范（v0.4.35）：空串表示不注入。
   Future<void> setSpecialtyRules(String value) =>
       store.patch(specialtyRules: value.trim());
+
+  /// 实体字段抽取轮数（v0.4.39）：0 = 关闭，其余按轮数取整并限制在 0–50。
+  Future<void> setEntityExtractEveryRounds(int value) =>
+      store.patch(entityExtractEveryRounds: value.clamp(0, 50));
 
   Future<void> setContextKeepRounds(int rounds) =>
       store.patch(contextKeepRounds: rounds < 0 ? 0 : rounds);
