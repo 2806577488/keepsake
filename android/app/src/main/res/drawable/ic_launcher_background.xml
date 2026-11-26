@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 图标底色：品牌深青对角渐变（#0A332C → #2F6B5F），与 tool/make_icon.py 同一套颜色。 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <gradient
+        android:angle="315"
+        android:startColor="#0A332C"
+        android:endColor="#2F6B5F"
+        android:type="linear"/>
+</shape>

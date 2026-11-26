@@ -15,9 +15,28 @@
 ///    下载补丁 → 原生 `applyPatch` 合并（`BsPatch.kt`，纯 Java/Kotlin 的 bspatch）
 ///    → 用元数据里的 `target_sha256` 校验新包；
 /// 4. **下载**：流式写入外部存储 `updates/`（拿不到就退到临时目录），带进度回调；
-/// 5. **安装**：走 Kotlin 侧 MethodChannel `keepsake/update` 的 `installApk`
+/// 5. **校验**：按 `<apk>.sha256` 附件校验完整包（E-24）；
+/// 6. **安装**：走 Kotlin 侧 MethodChannel `keepsake/update` 的 `installApk`
 ///    （`Intent(ACTION_VIEW) + FileProvider`），安装前检查「允许安装未知来源应用」；
 ///    被厂商安全策略拦住时按 `Build.MANUFACTURER` 给中文引导（H4）。
+///
+/// ## 慢在哪（2026-11 实测，决定下面这些设计）
+///
+/// - **资产下载没有镜像**：`browser_download_url` 先到 github.com 再 302 到
+///   objects.githubusercontent.com。同一份 32MB 的 APK，同一条链路上直连测到
+///   91KB/s、走 `gh-proxy.com` 130KB/s，而且换个代理节点又能到 1.6MB/s ——
+///   只认一个地址就是赌运气。所以资产也走 [assetMirrorPrefixes]，
+///   并且**记住上次跑通的源**，下次直接从它开始。
+/// - **校验文件是串行的**：`.sha256` 只有 90 字节，但要走完整重定向链，实测
+///   首字节 3.2s。放在下载完之后再拉，就是「进度 100% 后又卡三秒」的来源 →
+///   改成**和下载同时开始**（见 [download]），传完只剩本地算哈希的时间。
+/// - **每步都新建 http client**：check → patches.json → .sha256 → APK 是四次
+///   DNS + TLS 握手。改成全进程复用一个 [_shared] client（连接池复用）。
+/// - **慢源不会自己让路**：只看总超时的老实现里，一个 100KB/s 的源能拖着用户
+///   等五分钟。现在 [firstByteTimeout] / [slowGrace] / [minBytesPerSecond]
+///   会在「首字节不来」或「跑够 10 秒还不到 120KB/s」时换下一个源。
+/// - **进度回调太密**：每 8KB 一次回调，32MB 就是 4000 次 UI 重建 → 按
+///   [progressInterval] 节流。
 ///
 /// 为什么差分不是「zip 条目差分」：APK 的 v2/v3 签名覆盖整个文件字节，
 /// 重新打包不可能逐字节复现，客户端也没有私钥重签 → 装不上。所以必须「逐字节
@@ -83,6 +102,20 @@ class _DefinitiveFailure implements Exception {
   const _DefinitiveFailure(this.message);
 
   final String message;
+}
+
+/// 这个资产源不可用或太慢：换下一个源（直连 / 镜像）再试，不算更新失败。
+class _SourceFailure implements Exception {
+  const _SourceFailure(this.reason, {this.slow = false});
+
+  final String reason;
+
+  /// 只是「太慢」而**不是**不能用（还能继续下，只是慢）。
+  /// 全部源都这样时，调用方会放宽限速再试最后一次，不能让慢网用户更新不了。
+  final bool slow;
+
+  @override
+  String toString() => reason;
 }
 
 /// Release 里挑中的 APK 附件。
@@ -276,8 +309,60 @@ abstract final class UpdateService {
   /// GitHub API 强制要求 User-Agent，缺了会 403。
   static const String userAgent = 'keepsake-updater';
 
-  /// 元数据请求默认超时（下载不限总时长，只用连接超时）。
-  static const Duration defaultTimeout = Duration(seconds: 20);
+  /// 元数据请求超时。
+  ///
+  /// 12 秒是「慢网也够、失败也够快」的折中：接口返回只有几 KB，两个源串行失败
+  /// 最多 24 秒；老值是 20 秒，大陆网络下 api.github.com 被劫持时能白等 40 秒。
+  static const Duration defaultTimeout = Duration(seconds: 12);
+
+  /// 小文件（`.sha256` / `-patches.json`）的单独超时：几十字节的东西不值得
+  /// 等 12 秒，拉不到就走镜像或直接跳过校验（不能卡住安装）。
+  static const Duration metaTimeout = Duration(seconds: 8);
+
+  /// 资产（APK / 补丁）镜像前缀：把原地址整个拼在后面。
+  ///
+  /// 为什么要有：Release 资产的真实地址是 github.com 302 到
+  /// objects.githubusercontent.com。同一条链路实测 91KB/s ~ 1.6MB/s（代理换节点
+  /// 就变一次），国内直连通常更差；32MB 的包一旦落在慢的那档就是五分钟以上。
+  /// 多备几个源，谁快用谁 —— 这里只列**验证过能用**的两个。
+  static const List<String> assetMirrorPrefixes = <String>[
+    'https://gh-proxy.com/',
+    'https://ghfast.top/',
+  ];
+
+  /// 上一次下载成功的镜像前缀（空串 = 直连）。下次从它开始，省掉重新试探。
+  static String _preferredAssetPrefix = '';
+
+  /// 换源阈值：首字节等这么久还没来就换源（连接被墙/被劫持的典型表现）。
+  static const Duration firstByteTimeout = Duration(seconds: 6);
+
+  /// 低速宽限期：跑够这么久平均速度仍低于 [minBytesPerSecond] 就换源。
+  /// 太短会把「刚建连、TCP 还在慢启动」的慢源误判，太长又变成让用户干等。
+  static const Duration slowGrace = Duration(seconds: 10);
+
+  /// 宽限期后的最低可接受平均速度。
+  ///
+  /// 200KB/s 的含义是「31MB 要两分钟以上就值得试试别的源」。定得比这更松，
+  /// 直连几十 KB/s 那种最恶心的情形就不会触发换源；定得更紧，慢网（2G/弱信号）
+  /// 上会把每个源都试一遍才肯老实用慢速下载（所以下面还有 [slow] 兜底重试）。
+  static const int minBytesPerSecond = 200 * 1024;
+
+  /// 断流看门狗：这么久一个字节都没收到，就当作这个源挂了、换下一个。
+  static const Duration stallTimeout = Duration(seconds: 8);
+
+  /// 进度回调节流：网络块通常 8KB，32MB ≈ 4000 次回调 = 4000 次 UI 重建。
+  static const Duration progressInterval = Duration(milliseconds: 120);
+
+  /// 全进程复用的 HTTP client。
+  ///
+  /// 更新链路是 check → patches.json → .sha256 → APK 四跳，每跳都新建 client
+  /// 就要重新 DNS + TCP + TLS（实测单跳 TLS ≈ 0.2s，重定向到
+  /// objects.githubusercontent.com 还要再来一次）。复用一个 client 走连接池，
+  /// 后面三跳直接复用同一条连接。
+  static final http.Client _shared = http.Client();
+
+  /// 上次跑通的 Release 接口：下次优先用它，避免每次都先撞被墙的官方源。
+  static String _lastGoodEndpoint = '';
 
   /// 安装用的原生通道。
   static const MethodChannel _channel = MethodChannel('keepsake/update');
@@ -322,11 +407,12 @@ abstract final class UpdateService {
 
   /// 检查是否有新版本。
   ///
-  /// [httpClient] 为空时内部创建并关闭；传入时由调用方负责关闭。
+  /// [httpClient] 为空时走全进程共享的连接池；传入时由调用方负责关闭。
   ///
-  /// 换源策略（H3）：按 [releaseApiUrls] 顺序尝试，单源超时/网络错误/403/响应异常
-  /// 都只算「这个源不可用」，自动换下一个；全部失败后抛带 [manualUrl] 的
-  /// [UpdateException]，调用方据此给「在浏览器打开下载页」。
+  /// 换源策略（H3）：**先试上次成功的源**，再按 [releaseApiUrls] 顺序，
+  /// 单源超时/网络错误/403/响应异常都只算「这个源不可用」，自动换下一个；
+  /// 全部失败后抛带 [manualUrl] 的 [UpdateException]，调用方据此给
+  /// 「在浏览器打开下载页」。
   static Future<UpdateInfo> check({
     http.Client? httpClient,
     Duration timeout = defaultTimeout,
@@ -334,43 +420,45 @@ abstract final class UpdateService {
     final current = await currentVersion(refresh: true);
     // 先拿本机 ABI：挑包和挑补丁都要它，拿不到就退化成「优先通用包」。
     final abiToken = await _abiToken();
-    final client = httpClient ?? http.Client();
-    final owned = httpClient == null;
+    // 注入的 client 由调用方关闭；默认走共享池（不关，下一条请求还能复用连接）。
+    final client = httpClient ?? _shared;
     final failures = <String>[];
-    try {
-      for (final endpoint in releaseApiUrls) {
-        try {
-          final info = await _fetchRelease(
-            client,
-            endpoint,
-            timeout: timeout,
-            current: current,
-            abiToken: abiToken,
-          );
-          // 补丁元数据是「锦上添花」：拉不到就只是没有差分，不影响检查结果。
-          return await _attachPatchState(
-            info,
-            client,
-            timeout: timeout,
-            abiToken: abiToken,
-            current: current,
-          );
-        } on _DefinitiveFailure catch (error) {
-          // 服务端语义明确（如 404 还没有 Release）：换镜像也一样。
-          throw UpdateException(error.message);
-        } on _EndpointFailure catch (error) {
-          failures.add(error.reason);
-          debugPrint('更新源不可用（$endpoint）：${error.reason}，回退到下一个源');
-        }
+    // 上次成功的源排到最前：大陆网络下官方 API 常年 403/超时，每次都先撞一遍
+    // 是纯粹的等待。
+    final endpoints = <String>[
+      if (_lastGoodEndpoint.isNotEmpty) _lastGoodEndpoint,
+      ...releaseApiUrls.where((e) => e != _lastGoodEndpoint),
+    ];
+    for (final endpoint in endpoints) {
+      try {
+        final info = await _fetchRelease(
+          client,
+          endpoint,
+          timeout: timeout,
+          current: current,
+          abiToken: abiToken,
+        );
+        _lastGoodEndpoint = endpoint;
+        // 补丁元数据是「锦上添花」：拉不到就只是没有差分，不影响检查结果。
+        return await _attachPatchState(
+          info,
+          client,
+          abiToken: abiToken,
+          current: current,
+        );
+      } on _DefinitiveFailure catch (error) {
+        // 服务端语义明确（如 404 还没有 Release）：换镜像也一样。
+        throw UpdateException(error.message);
+      } on _EndpointFailure catch (error) {
+        failures.add(error.reason);
+        debugPrint('更新源不可用（$endpoint）：${error.reason}，回退到下一个源');
       }
-      throw UpdateException(
-        '检查更新失败：连不上 GitHub（${failures.join('；')}）。'
-        '可以在浏览器打开下载页查看最新版本。',
-        manualUrl: manualUrl,
-      );
-    } finally {
-      if (owned) client.close();
     }
+    throw UpdateException(
+      '检查更新失败：连不上 GitHub（${failures.join('；')}）。'
+      '可以在浏览器打开下载页查看最新版本。',
+      manualUrl: manualUrl,
+    );
   }
 
   /// 请求单个更新源并解析成 [UpdateInfo]。
@@ -473,6 +561,7 @@ abstract final class UpdateService {
       info,
       httpClient: httpClient,
       onProgress: onProgress,
+      onStage: onStage,
       timeout: timeout,
     );
   }
@@ -556,43 +645,53 @@ abstract final class UpdateService {
 
   /// 流式下载完整 APK 到本地，返回落盘文件。
   ///
-  /// [onProgress] 每收到一块就回调（已下载字节数, 总字节数；总长度未知时为 -1）。
+  /// [onProgress] 会被节流到每 [progressInterval] 一次（已下载字节数, 总字节数；
+  /// 总长度未知时为 -1）；[onStage] 只给 UI 文案。
   static Future<File> download(
     UpdateInfo info, {
     http.Client? httpClient,
     void Function(int received, int total)? onProgress,
+    void Function(String stage)? onStage,
     Duration timeout = defaultTimeout,
   }) async {
     final asset = info.apk;
     if (asset == null) {
       throw const UpdateException('下载失败：这个版本没有提供 APK 安装包');
     }
+    final client = httpClient ?? _shared;
+
+    // **校验文件先发车**：它只有几十字节，却要走一次 github.com → objects 的
+    // 重定向链（实测首字节 3.2s）。和下载并行，下完之后只剩本地算哈希的时间；
+    // 串行就是「进度 100% 又卡三秒」。
+    final checksumFuture = asset.hasChecksum
+        ? _fetchChecksum(asset.checksumUrl!, httpClient: client)
+        : Future<String>.value('');
+
     final file = await _streamToFile(
       url: asset.url,
       fileName: _safeFileName(asset.name, fallbackVersion: info.latest),
       label: '安装包',
       onProgress: onProgress,
       timeout: timeout,
-      httpClient: httpClient,
+      httpClient: client,
     );
+
+    onStage?.call('正在校验安装包…');
+    final expected = await checksumFuture;
     // 构建库会给每个 APK 发一个 `.sha256` 附件：有就强制校验，不匹配直接删文件并报错，
     // 绝不把半截/被篡改的包交给安装器（E-24）。老版本 Release 没有该附件时跳过。
-    await _verifyDownloadChecksum(info, file, httpClient: httpClient, timeout: timeout);
+    await _verifyDownloadChecksum(file, expected: expected);
     return file;
   }
 
-  /// 下载完整包后按 `<apk>.sha256` 校验；没有校验附件时静默跳过。
+  /// 按已拿到的期望值校验完整包。[expected] 为空 = 这次没拿到校验值，跳过。
   static Future<void> _verifyDownloadChecksum(
-    UpdateInfo info,
     File file, {
-    http.Client? httpClient,
-    Duration timeout = defaultTimeout,
+    required String expected,
   }) async {
-    final String url = info.apk?.checksumUrl ?? '';
-    if (url.isEmpty) return;
-    final String expected = await _fetchChecksum(url, httpClient: httpClient, timeout: timeout);
     if (expected.isEmpty) {
-      debugPrint('校验附件里没有解析出 sha256，跳过校验');
+      // 不阻塞安装，但日志要能看出「这次其实没校验」。
+      debugPrint('没有可用的 sha256 校验值，跳过安装包校验');
       return;
     }
     final String? actual = await _fileSha256(file.path);
@@ -601,40 +700,49 @@ abstract final class UpdateService {
       debugPrint('算不出本地安装包的 sha256，跳过校验');
       return;
     }
-    if (actual.toLowerCase() != expected) {
-      try {
-        if (await file.exists()) await file.delete();
-      } catch (error) {
-        debugPrint('删除校验失败的安装包失败：$error');
-      }
-      throw const UpdateException('安装包校验失败（sha256 不匹配），文件已删除，请重试');
+    if (actual.toLowerCase() == expected) return;
+    try {
+      if (await file.exists()) await file.delete();
+    } catch (error) {
+      debugPrint('删除校验失败的安装包失败：$error');
     }
+    throw const UpdateException('安装包校验失败（sha256 不匹配），文件已删除，请重试');
   }
 
-  /// 读取 `.sha256` 附件，返回 64 位小写十六进制；解析失败返回空串。
+  /// 读取 `.sha256` 附件，返回 64 位小写十六进制；拿不到返回空串。
+  ///
+  /// 同样按「直连 → 镜像」试：这条链也走 github.com 的 302，且只有几十字节，
+  /// 用 [metaTimeout] 而不是下载超时 —— 校验不该比下载还慢。
   static Future<String> _fetchChecksum(
     String url, {
     http.Client? httpClient,
-    Duration timeout = defaultTimeout,
+    Duration timeout = metaTimeout,
   }) async {
-    final client = httpClient ?? http.Client();
-    final owned = httpClient == null;
-    try {
-      final response = await client
-          .get(Uri.parse(url), headers: <String, String>{'User-Agent': userAgent})
-          .timeout(timeout);
-      if (response.statusCode != 200) {
-        debugPrint('读取 sha256 附件失败：HTTP ${response.statusCode}');
-        return '';
+    final client = httpClient ?? _shared;
+    final failures = <String>[];
+    for (final candidate in _assetCandidates(url)) {
+      try {
+        final response = await client
+            .get(
+              Uri.parse(candidate),
+              headers: <String, String>{'User-Agent': userAgent},
+            )
+            .timeout(timeout);
+        if (response.statusCode != 200) {
+          failures.add('HTTP ${response.statusCode}');
+          continue;
+        }
+        final match = RegExp(
+          r'[0-9a-fA-F]{64}',
+        ).firstMatch(utf8.decode(response.bodyBytes));
+        if (match != null) return match.group(0)!.toLowerCase();
+        failures.add('响应里没有 sha256');
+      } catch (error) {
+        failures.add('$error');
       }
-      final match = RegExp(r'[0-9a-fA-F]{64}').firstMatch(utf8.decode(response.bodyBytes));
-      return match?.group(0)?.toLowerCase() ?? '';
-    } catch (error) {
-      debugPrint('读取 sha256 附件异常：$error');
-      return '';
-    } finally {
-      if (owned) client.close();
     }
+    debugPrint('读取 sha256 附件失败（${failures.join('；')}），这次跳过校验');
+    return '';
   }
 
   /// 原生算任意文件的 sha256（Dart 侧没有加密库）。
@@ -654,7 +762,23 @@ abstract final class UpdateService {
     }
   }
 
-  /// 把一个远程文件流式写到 `updates/` 下（完整 APK 与差分补丁共用）。
+  /// 一个资产地址的候选列表：**上次跑通的源 → 直连 → 各镜像**（去重保序）。
+  ///
+  /// 镜像前缀是「拼在原地址前面」的转发服务，所以候选就是把前缀拼上去；
+  /// 记住上次成功的那个，可以让第二次更新直接走快的那条。
+  static List<String> _assetCandidates(String url) {
+    final out = <String>[
+      if (_preferredAssetPrefix.isNotEmpty) '$_preferredAssetPrefix$url',
+      url,
+      for (final prefix in assetMirrorPrefixes) '$prefix$url',
+    ];
+    return out.toSet().toList(growable: false);
+  }
+
+  /// 把一个远程文件流式写到 `updates/` 下（完整 APK、差分补丁、校验文件共用）。
+  ///
+  /// 逐个候选源试：首字节不来 / 断流 / 太慢都只算「这个源不行」，换下一个；
+  /// 全部失败才抛 [UpdateException]（带「在浏览器打开」兜底）。
   static Future<File> _streamToFile({
     required String url,
     required String fileName,
@@ -663,17 +787,90 @@ abstract final class UpdateService {
     void Function(int received, int total)? onProgress,
     Duration timeout = defaultTimeout,
   }) async {
-    final client = httpClient ?? http.Client();
-    final owned = httpClient == null;
+    final client = httpClient ?? _shared;
+    final failures = <String>[];
+    final candidates = _assetCandidates(url);
+    var sawSlowOnly = false;
+    for (final candidate in candidates) {
+      try {
+        final file = await _streamFrom(
+          candidate,
+          fileName: fileName,
+          label: label,
+          client: client,
+          onProgress: onProgress,
+          timeout: timeout,
+        );
+        // 记住这个源，下次直接从这里开始（直连记成空串）。
+        _preferredAssetPrefix = candidate == url
+            ? ''
+            : candidate.substring(0, candidate.length - url.length);
+        return file;
+      } on _SourceFailure catch (error) {
+        if (error.slow) sawSlowOnly = true;
+        failures.add(error.reason);
+        debugPrint('资产源不可用（$candidate）：${error.reason}，换下一个');
+      }
+    }
+    // 慢速看门狗的目的是「换到更快的源」，不是「让慢网用户下不了更新」。
+    // 如果失败的都只是「慢」（不是 404/断流），放宽限速再试直连一次。
+    if (sawSlowOnly && candidates.isNotEmpty) {
+      debugPrint('所有源都偏慢，放宽限速再试一次（$label）');
+      try {
+        return await _streamFrom(
+          candidates.first,
+          fileName: fileName,
+          label: label,
+          client: client,
+          onProgress: onProgress,
+          timeout: timeout,
+          enforceSpeed: false,
+        );
+      } on _SourceFailure catch (error) {
+        failures.add('最后再试一次：${error.reason}');
+      }
+    }
+    throw UpdateException(
+      '下载$label失败：所有下载源都不可用（${failures.join('；')}）',
+      manualUrl: manualUrl,
+    );
+  }
+
+  /// 从**单个**地址流式下载到目标文件；这个源不行时抛 [_SourceFailure]。
+  ///
+  /// [enforceSpeed] 为 false 时不因为「平均速度太低」主动放弃（仍保留断流看门狗），
+  /// 用于「所有源都慢」时的兜底重试。
+  static Future<File> _streamFrom(
+    String url, {
+    required String fileName,
+    required String label,
+    required http.Client client,
+    void Function(int received, int total)? onProgress,
+    required Duration timeout,
+    bool enforceSpeed = true,
+  }) async {
     File? target;
     IOSink? sink;
     try {
       final request = http.Request('GET', Uri.parse(url))
         ..headers['User-Agent'] = userAgent;
-      // 连接/首包超时；后续分块读取由调用方的进度条体现，不再卡总时长。
-      final response = await client.send(request).timeout(timeout);
+      final http.StreamedResponse response;
+      try {
+        // 只卡「建连 + 首包」：6 秒不来就换源，别让人对着 0% 等满总超时。
+        // 调用方传了更短的 timeout 时以调用方为准。
+        final Duration firstByte = firstByteTimeout < timeout
+            ? firstByteTimeout
+            : timeout;
+        response = await client.send(request).timeout(firstByte);
+      } on TimeoutException {
+        throw _SourceFailure('连接超时（${firstByteTimeout.inSeconds} 秒没有首包）');
+      } on http.ClientException catch (error) {
+        throw _SourceFailure('网络错误（${error.message}）');
+      } catch (error) {
+        throw _SourceFailure('$error');
+      }
       if (response.statusCode != 200) {
-        throw UpdateException('下载$label失败：HTTP ${response.statusCode}');
+        throw _SourceFailure('HTTP ${response.statusCode}');
       }
 
       final dir = await _updateDir();
@@ -682,34 +879,72 @@ abstract final class UpdateService {
         await target.delete();
       }
       sink = target.openWrite();
+
       final total = response.contentLength ?? -1;
       var received = 0;
-      await for (final chunk in response.stream) {
+      final clock = Stopwatch()..start();
+      var lastEmitMs = 0;
+      // 断流看门狗：Dart 的 stream.timeout 语义正是「这么久没有事件就触发」，
+      // 比手写 Timer 干净（触发后 addError，下面 await for 会抛出来）。
+      final stream = response.stream.timeout(
+        stallTimeout,
+        onTimeout: (EventSink<List<int>> out) {
+          out.addError(
+            _SourceFailure('下载断流（${stallTimeout.inSeconds} 秒没收到数据）'),
+          );
+          out.close();
+        },
+      );
+
+      await for (final chunk in stream) {
         received += chunk.length;
         sink.add(chunk);
-        onProgress?.call(received, total);
+        final int ms = clock.elapsedMilliseconds;
+        if (ms - lastEmitMs >= progressInterval.inMilliseconds) {
+          lastEmitMs = ms;
+          onProgress?.call(received, total);
+        }
+        // 慢速看门狗：宽限期过了平均速度还不起色，换源比干等快。
+        // ms 一定 ≥ slowGrace（10s），不会除零。标记 slow=true：只剩这一种
+        // 失败时，调用方会放宽限速再试一次。
+        if (enforceSpeed &&
+            ms >= slowGrace.inMilliseconds &&
+            received * 1000 ~/ ms < minBytesPerSecond) {
+          throw _SourceFailure(
+            '速度过低（${received * 1000 ~/ ms ~/ 1024} KB/s）',
+            slow: true,
+          );
+        }
       }
       await sink.flush();
       await sink.close();
       sink = null;
+      // 收尾再报一次：节流可能吞掉最后一块，UI 要停在 100%。
+      onProgress?.call(received, total == -1 ? received : total);
 
       final length = await target.length();
       if (total > 0 && length != total) {
-        // 半截文件绝不能拿去安装或合并，显式报错并删掉。
-        throw UpdateException('下载$label失败：文件不完整（$length/$total 字节）');
+        // 半截文件绝不能拿去安装或合并，当作这个源坏了、换下一个。
+        try {
+          if (await target.exists()) await target.delete();
+        } catch (error) {
+          debugPrint('清理不完整文件失败：$error');
+        }
+        throw _SourceFailure('文件不完整（$length/$total 字节）');
       }
       return target;
-    } on UpdateException {
+    } on _SourceFailure {
       rethrow;
     } on TimeoutException {
-      throw UpdateException('下载$label失败：连接超时');
+      throw const _SourceFailure('下载超时');
     } on http.ClientException catch (error) {
-      throw UpdateException('下载$label失败：网络错误（${error.message}）');
+      throw _SourceFailure('网络错误（${error.message}）');
     } on FileSystemException catch (error) {
+      // 写盘错误换源也没用（磁盘满/没权限），直接失败。
       throw UpdateException('下载$label失败：写入文件出错（${error.message}）');
     } catch (error) {
       if (error is UpdateException || error is NeedInstallPermission) rethrow;
-      throw UpdateException('下载$label失败：$error');
+      throw _SourceFailure('$error');
     } finally {
       if (sink != null) {
         // 中途失败：关掉句柄，再删掉半截文件（删失败也不该盖住原始错误）。
@@ -727,7 +962,6 @@ abstract final class UpdateService {
           }
         }
       }
-      if (owned) client.close();
     }
   }
 
@@ -1086,7 +1320,6 @@ abstract final class UpdateService {
   static Future<UpdateInfo> _attachPatchState(
     UpdateInfo info,
     http.Client client, {
-    required Duration timeout,
     required String abiToken,
     required String current,
   }) async {
@@ -1097,10 +1330,17 @@ abstract final class UpdateService {
       debugPrint('本次 Release 没有补丁元数据 json，跳过差分更新');
       return info;
     }
+    // 本机已安装包的 sha256 和补丁元数据互不依赖，一起发车：
+    // 32MB 包的原生哈希要读满整个 APK，串在元数据后面就是白等一次读盘。
+    // onError 兜住「元数据先失败、这个 future 没人等」时的未处理异步错误。
+    final installedShaFuture = installedApkSha256().then<String?>(
+      (value) => value,
+      onError: (Object _) => null,
+    );
     try {
       final response = await client
           .get(Uri.parse(metaUrl), headers: _headers)
-          .timeout(timeout);
+          .timeout(metaTimeout);
       if (response.statusCode != 200) {
         debugPrint('补丁元数据不可用：HTTP ${response.statusCode}，跳过差分更新');
         return info;
@@ -1113,7 +1353,7 @@ abstract final class UpdateService {
       debugPrint('拉补丁元数据失败：$error，跳过差分更新');
       return info;
     }
-    final installedSha = await installedApkSha256();
+    final installedSha = await installedShaFuture;
     final chosen = _selectPatch(
       patches,
       abiToken: abiToken,
