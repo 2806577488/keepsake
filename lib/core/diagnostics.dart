@@ -9,6 +9,7 @@ import 'dart:io';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
 
+import 'api/provider_models.dart';
 import 'db/database.dart';
 import 'settings.dart';
 
@@ -16,6 +17,7 @@ import 'settings.dart';
 Future<String> buildDiagnosticsText({
   required AppDatabase db,
   required Settings settings,
+  AiProvider? provider,
 }) async {
   final buffer = StringBuffer()
     ..writeln('Keepsake 诊断信息')
@@ -37,7 +39,13 @@ Future<String> buildDiagnosticsText({
 
   buffer
     ..writeln('设置（脱敏，不含 Key）：')
-    ..writeln('  平台：${settings.providerId.isEmpty ? '未配置' : settings.providerId}')
+    ..writeln(
+      '  平台：${provider == null ? '未选中' : '${provider.presetId}（${provider.name}）'}',
+    )
+    ..writeln('  接口：${provider == null ? '—' : provider.effectiveBaseUrl}')
+    ..writeln(
+      '  Key：${provider == null ? '—' : (provider.apiKey.trim().isEmpty ? '未配置' : '已配置')}',
+    )
     ..writeln('  模型：${settings.defaultModel}')
     ..writeln(
       '  思考：${settings.thinkingEnabled ? '开' : '关'} / '
@@ -87,8 +95,13 @@ String _on(bool value) => value ? '开' : '关';
 Future<File> exportDiagnosticsFile({
   required AppDatabase db,
   required Settings settings,
+  AiProvider? provider,
 }) async {
-  final text = await buildDiagnosticsText(db: db, settings: settings);
+  final text = await buildDiagnosticsText(
+    db: db,
+    settings: settings,
+    provider: provider,
+  );
   final dir = await getTemporaryDirectory();
   final file = File(
     '${dir.path}${Platform.pathSeparator}'

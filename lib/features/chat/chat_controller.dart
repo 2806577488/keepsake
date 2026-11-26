@@ -1062,6 +1062,8 @@ class ChatController extends Notifier<ChatUiState> {
         view,
       ],
     );
+    // v0.4.43：附件一加进来就在后台预上传，发送时通常已经拿到 file_id。
+    unawaited(_prewarmUpload());
     return null;
   }
 
@@ -1098,6 +1100,17 @@ class ChatController extends Notifier<ChatUiState> {
     }
     if (_sessionId.isEmpty || provider == null) return;
     state = state.copyWith(error: null);
+
+    // 0) 等后台预上传收尾：附件加入时已经在传，这里通常只需等最后一点。
+    final prewarm = _prewarm;
+    if (prewarm != null) {
+      try {
+        await prewarm;
+      } catch (_) {
+        // 预上传失败不在这里报：下面 _uploadPending 会统一重试/报错。
+      }
+    }
+    if (_disposed) return;
 
     // 1) 待发送附件先上传（DeepSeek Files API）。
     List<ChatAttachmentView> uploaded;
@@ -2294,12 +2307,108 @@ class ChatController extends Notifier<ChatUiState> {
   // 附件上传
   // -------------------------------------------------------------------------
 
+  /// 正在进行的后台预上传（同一时刻只跑一个循环，新附件由循环自己捡起）。
+  Future<void>? _prewarm;
+
+  /// 附件加入待发送区后立刻在后台预上传。
+  ///
+  /// 发送时 `_send` 先等它收尾，再走 `_uploadPending`（已传好的直接跳过），
+  /// 所以用户点发送时一般不用再等网络。
+  Future<void> _prewarmUpload() {
+    final running = _prewarm;
+    if (running != null) return running;
+    final future = _runPrewarm();
+    _prewarm = future;
+    return future.whenComplete(() {
+      if (identical(_prewarm, future)) _prewarm = null;
+    });
+  }
+
+  Future<void> _runPrewarm() async {
+    final provider = _resolveProvider();
+    if (provider == null ||
+        !provider.supportsFiles ||
+        provider.apiKey.trim().isEmpty) {
+      return;
+    }
+    while (true) {
+      final next = state.pendingAttachments
+          .where(
+            (item) =>
+                !item.uploaded && item.status != ChatAttachmentStatus.failed,
+          )
+          .toList(growable: false);
+      if (next.isEmpty) return;
+      for (final view in next) {
+        if (_disposed) return;
+        if (!state.pendingAttachments.any((item) => item.id == view.id)) {
+          continue;
+        }
+        _setAttachmentStatus(view.id, ChatAttachmentStatus.uploading);
+        final client = ref.read(httpClientFactoryProvider)();
+        try {
+          final fileId = await uploadAttachment(
+            view.toAttachment(sessionId: _sessionId),
+            baseUrl: provider.effectiveBaseUrl,
+            apiKey: provider.apiKey,
+            client: client,
+          );
+          if (_disposed) return;
+          if (!state.pendingAttachments.any((item) => item.id == view.id)) {
+            continue;
+          }
+          state = state.copyWith(
+            pendingAttachments: <ChatAttachmentView>[
+              for (final item in state.pendingAttachments)
+                item.id == view.id
+                    ? item.copyWith(
+                        status: ChatAttachmentStatus.ready,
+                        fileId: fileId,
+                      )
+                    : item,
+            ],
+          );
+        } catch (error) {
+          if (!state.pendingAttachments.any((item) => item.id == view.id)) {
+            continue;
+          }
+          state = state.copyWith(
+            pendingAttachments: <ChatAttachmentView>[
+              for (final item in state.pendingAttachments)
+                item.id == view.id
+                    ? item.copyWith(
+                        status: ChatAttachmentStatus.failed,
+                        error: _errorMessageOf(error),
+                      )
+                    : item,
+            ],
+          );
+        } finally {
+          client.close();
+        }
+      }
+    }
+  }
+
+  void _setAttachmentStatus(String id, ChatAttachmentStatus status) {
+    state = state.copyWith(
+      pendingAttachments: <ChatAttachmentView>[
+        for (final item in state.pendingAttachments)
+          item.id == id ? item.copyWith(status: status) : item,
+      ],
+    );
+  }
+
   /// 上传所有待发送附件；失败抛 [_UploadAbort]（UI 显示错误并保留草稿）。
   Future<List<ChatAttachmentView>> _uploadPending(AiProvider provider) async {
     final pending = state.pendingAttachments;
     if (pending.isEmpty) return const <ChatAttachmentView>[];
     if (!provider.supportsFiles) {
       throw const _UploadAbort(kAttachUnsupportedMessage);
+    }
+    // 没配 Key 时上传必然失败，直接给明确原因（不要落到「网络错误」）。
+    if (provider.apiKey.trim().isEmpty) {
+      throw const _UploadAbort('当前平台没有配置 API Key，无法上传附件');
     }
     if (state.uploading) return pending;
     state = state.copyWith(uploading: true, error: null);
@@ -2349,7 +2458,13 @@ class ChatController extends Notifier<ChatUiState> {
                 item.id == view.id ? failed : item,
             ],
           );
-          throw _UploadAbort('$kUploadFailedPrefix${_errorMessageOf(error)}');
+          // 不重复叠「上传失败：」前缀（底层可能已经带过一次）。
+          final message = _errorMessageOf(error);
+          throw _UploadAbort(
+            message.startsWith(kUploadFailedPrefix)
+                ? message
+                : '$kUploadFailedPrefix$message',
+          );
         }
       }
       return uploaded;
