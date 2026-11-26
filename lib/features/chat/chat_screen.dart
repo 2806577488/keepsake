@@ -1305,54 +1305,66 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
               ),
               if (state.uploading) const LinearProgressIndicator(minHeight: 2),
               Expanded(child: _buildMessageList(state)),
-              // 「回到底部」按钮：放在列表**外面**（列表与芯片之间，右对齐），
-              // 不再浮在消息上盖住最后一条气泡的文字（模拟器实测：它会压住
-              // 最后一条气泡右侧的半行字）。
-              ValueListenableBuilder<bool>(
-                valueListenable: _autoFollow,
-                builder: (BuildContext context, bool autoFollow, Widget? child) {
-                  if (autoFollow || state.messages.isEmpty) {
-                    return const SizedBox.shrink();
-                  }
-                  final skin = KeepsakeSkinColors.of(context);
-                  return Align(
-                    alignment: Alignment.centerRight,
-                    child: Padding(
-                      padding: const EdgeInsets.only(right: 12, bottom: 4),
-                      child: _ArrowButton(
-                        icon: skin.icon(
-                          filled: Icons.keyboard_arrow_down,
-                          outlined: Icons.keyboard_arrow_down,
-                        ),
-                        tooltip: '回到底部',
-                        onPressed: _jumpToBottom,
-                      ),
-                    ),
-                  );
-                },
-              ),
+              // 「回到底部」按钮：挪到**芯片行最右端**（和三个工具芯片同一行）。
+              // 之前放在列表与芯片之间单独一行：不压字，但会空出一条横带、
+              // 还挤掉消息区一截高度（用户实测反馈"整一行盖我文字"）。
+              // 也不浮在消息上（会压住最后一条气泡右下的半行字）。
               _PendingChips(
                 attachments: state.pendingAttachments,
                 uploading: state.uploading,
                 onRemove: _controller.removeAttachment,
               ),
               if (!compact)
-                _ComposerTools(
-                  searchEnabled: state.searchEnabled,
-                  // 芯片显示**当前生效值**（会话覆盖 ?? 全局默认），不是全局默认值本身。
-                  thinkingEnabled: state.thinkingEnabled,
-                  thinkingLevel: state.thinkingLevel,
-                  contextKeepRounds: state.contextKeepRounds,
-                  supportsSearch: supportsSearch,
-                  supportsThinking: supportsThinking,
-                  onToggleSearch: () => unawaited(
-                    _controller.setSearchEnabled(!state.searchEnabled),
-                  ),
-                  onToggleThinking: () => unawaited(
-                    _controller.setThinkingEnabled(!state.thinkingEnabled),
-                  ),
-                  onEditThinkingLevel: () => unawaited(_editThinkingLevel()),
-                  onEditContextBudget: () => unawaited(_editContextBudget()),
+                Row(
+                  children: <Widget>[
+                    Expanded(
+                      child: _ComposerTools(
+                        searchEnabled: state.searchEnabled,
+                        // 芯片显示**当前生效值**（会话覆盖 ?? 全局默认），不是全局默认值本身。
+                        thinkingEnabled: state.thinkingEnabled,
+                        thinkingLevel: state.thinkingLevel,
+                        contextKeepRounds: state.contextKeepRounds,
+                        supportsSearch: supportsSearch,
+                        supportsThinking: supportsThinking,
+                        onToggleSearch: () => unawaited(
+                          _controller.setSearchEnabled(!state.searchEnabled),
+                        ),
+                        onToggleThinking: () => unawaited(
+                          _controller.setThinkingEnabled(!state.thinkingEnabled),
+                        ),
+                        onEditThinkingLevel: () => unawaited(_editThinkingLevel()),
+                        onEditContextBudget: () => unawaited(_editContextBudget()),
+                      ),
+                    ),
+                    // 只在离开底部时出现；右对齐到芯片行末尾，不占独立行。
+                    ValueListenableBuilder<bool>(
+                      valueListenable: _autoFollow,
+                      builder: (
+                        BuildContext context,
+                        bool autoFollow,
+                        Widget? child,
+                      ) {
+                        if (autoFollow || state.messages.isEmpty) {
+                          return const SizedBox.shrink();
+                        }
+                        final skin = KeepsakeSkinColors.of(context);
+                        return Padding(
+                          padding: const EdgeInsets.only(
+                            left: 6,
+                            right: KeepsakeTheme.pagePadding,
+                          ),
+                          child: _ArrowButton(
+                            icon: skin.icon(
+                              filled: Icons.keyboard_arrow_down,
+                              outlined: Icons.keyboard_arrow_down,
+                            ),
+                            tooltip: '回到底部',
+                            onPressed: _jumpToBottom,
+                          ),
+                        );
+                      },
+                    ),
+                  ],
                 ),
               _InputBar(
                 controller: _input,
