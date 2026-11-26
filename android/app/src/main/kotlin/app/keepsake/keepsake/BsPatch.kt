@@ -134,9 +134,9 @@ internal object BsPatch {
                                 while (wrote < newSize) {
                                     val triple = ByteArray(24)
                                     readFully(ctrl.stream, triple, 24, "控制段")
-                                    val diffLen = readInt64(triple, 0)
-                                    val extraLen = readInt64(triple, 8)
-                                    val seek = readInt64(triple, 16)
+                                    val diffLen = readOfftin(triple, 0)
+                                    val extraLen = readOfftin(triple, 8)
+                                    val seek = readOfftin(triple, 16)
                                     if (diffLen < 0 || extraLen < 0) {
                                         throw PatchException("控制段长度非法（$diffLen / $extraLen）")
                                     }
@@ -144,24 +144,33 @@ internal object BsPatch {
                                         throw PatchException("控制段越界：会把新包写超出声明大小")
                                     }
 
-                                    // 1) diff 段与旧包叠加。旧包越界部分按 0 处理（bspatch 语义）。
+                                    // 1) diff 段与旧包叠加。旧包越界部分按 0 处理（bspatch 语义）：
+                                    //    oldPos < 0 时，开头 -oldPos 个字节直接保留 diff 值，
+                                    //    后面 `chunk - skip` 个字节才和 old[oldPos+skip...] 相加。
+                                    //    以前 oldPos<0 时整段按 0 加，等于把新包开头抹成 0x00。
                                     var left = diffLen
                                     while (left > 0) {
                                         val chunk = (if (left < BLOCK) left else BLOCK.toLong()).toInt()
                                         readFully(diff.stream, diffBuf, chunk, "diff 段")
-                                        val avail = when {
-                                            oldPos < 0 || oldPos >= oldLen -> 0
-                                            else -> {
-                                                val rest = oldLen - oldPos
-                                                (if (rest < chunk) rest else chunk.toLong()).toInt()
-                                            }
+                                        val skipLong = if (oldPos < 0) -oldPos else 0L
+                                        val skip = if (skipLong > chunk) chunk else skipLong.toInt()
+                                        val bodyStart = oldPos + skip
+                                        val bodyWant = chunk - skip
+                                        var avail = 0
+                                        if (bodyWant > 0 && bodyStart < oldLen) {
+                                            val rest = oldLen - bodyStart
+                                            avail = (if (rest < bodyWant) rest else bodyWant.toLong()).toInt()
                                         }
                                         if (avail > 0) {
-                                            old.seek(oldPos)
+                                            old.seek(bodyStart)
                                             readFully(old, oldBuf, avail, "旧包")
                                         }
                                         for (i in 0 until chunk) {
-                                            val base = if (i < avail) oldBuf[i].toInt() and 0xFF else 0
+                                            val base = when {
+                                                i < skip -> 0
+                                                i - skip < avail -> oldBuf[i - skip].toInt() and 0xFF
+                                                else -> 0
+                                            }
                                             outBuf[i] = ((base + (diffBuf[i].toInt() and 0xFF)) and 0xFF).toByte()
                                         }
                                         out.write(outBuf, 0, chunk)
@@ -350,6 +359,22 @@ internal object BsPatch {
             value = (value shl 8) or (buf[offset + i].toLong() and 0xFF)
         }
         return value
+    }
+
+    /**
+     * bsdiff 的整数编码：**符号位 + 绝对值**，不是补码（见 bspatch.c 的 `offtin`）。
+     *
+     * 低 7 字节按小端拼出绝对值，最高字节的最高位是符号位。用补码（[readInt64]）读
+     * ctrl 会把 `seek = -1` 读成 `-9223372036854775807`，旧包位置直接飞出 2^63，
+     * 合并出来的包 sha256 必然对不上 —— 这是「差分更新从来没成功过」的根因。
+     * KSD1 自己的头部（newSize / 段长度）是本项目定义的补码，仍用 [readInt64]/[readUInt32]。
+     */
+    private fun readOfftin(buf: ByteArray, offset: Int): Long {
+        var magnitude = buf[offset + 7].toLong() and 0x7F
+        for (i in 6 downTo 0) {
+            magnitude = (magnitude shl 8) or (buf[offset + i].toLong() and 0xFF)
+        }
+        return if (buf[offset + 7].toInt() and 0x80 != 0) -magnitude else magnitude
     }
 
     private fun readUInt32(buf: ByteArray, offset: Int): Long {
